@@ -67,6 +67,9 @@
   .chip { padding:3px 13px; border-radius:99px; font-size:14px; border:1px solid var(--peach-line); background:var(--peach); color:var(--peach-ink); }
   .chip.done { background:#f1f1f4; border-color:#e2e2e8; color:#a6a6b3; }
   .chip.me { font-weight:700; border-width:2px; }
+  .sortrow { display:flex; align-items:center; gap:8px; padding:8px 4px; border-bottom:1px solid var(--line); }
+  .sortno { width:2em; text-align:right; color:var(--sub); font-size:13px; }
+  .sortname { flex:1; }
   .grp { font-size:13px; font-weight:600; margin-top:12px; color:var(--ink); }
   .prog { display:flex; align-items:center; gap:10px; margin-top:8px; }
   .prog .bar { flex:1; }
@@ -450,33 +453,96 @@ function adminMain() {
 // ---- 職員タブ ----
 function adminStaff(body) {
   const box = h('div');
+  const listMsg = h('div');
   const listBox = h('div', {}, h('div', { class: 'sub' }, '読み込み中…'));
   const names = h('textarea', { placeholder: '1行に1人ずつ名前を入力\n例:\n山田 花子\n佐藤 太郎' });
   const addBtn = h('button', { class: 'block' }, '追加する(初期PINは全員 0000)');
   const resBox = h('div');
+  const sortBtn = h('button', { class: 'ghost small' }, '並べ替え');
+  let staff = [];
 
   function load() {
-    call('adminGetStaff', S.ad.cred).then(list => {
-      listBox.replaceChildren(list.length === 0 ? h('div', { class: 'sub' }, 'まだ職員が登録されていません。') :
-        h('table', {}, h('tr', {}, h('th', {}, '名前'), h('th', {}, '状態'), h('th', {}, '')),
-          list.map(s => h('tr', {},
-            h('td', { style: s.active ? '' : 'color:#999' }, s.name),
-            h('td', {}, s.active ? null : h('span', { class: 'tag gray' }, '無効'),
-              s.active && !s.pinChanged ? h('span', { class: 'tag warn' }, '初期PIN') : null,
-              s.locked ? h('span', { class: 'tag warn' }, 'ロック中') : null),
-            h('td', {}, h('div', { class: 'row' },
-              h('button', { class: 'ghost small', onclick: () => {
-                if (!confirm(s.name + ' さんのPINをリセットします。よろしいですか?')) return;
-                call('adminResetPin', S.ad.cred, s.staffId).then(r => {
-                  setMsg(resBox, h('div', { class: 'ok' }, r.name + ' さんのPINを初期PIN ', h('b', {}, r.pin), ' に戻しました(初回ログイン時に本人が変更します)'));
-                  load();
-                }).catch(e => setMsg(box, errBox(e.message)));
-              } }, 'PINリセット'),
-              h('button', { class: 'danger small', onclick: () => {
-                call('adminSetActive', S.ad.cred, s.staffId, !s.active).then(load).catch(e => setMsg(box, errBox(e.message)));
-              } }, s.active ? '無効にする' : '有効に戻す')))))));
-    }).catch(e => setMsg(box, errBox(e.message)));
+    call('adminGetStaff', S.ad.cred).then(list => { staff = list; renderList(); })
+      .catch(e => setMsg(listMsg, errBox(e.message)));
   }
+
+  // ---- 通常の一覧(名前の修正・PINリセット・無効化) ----
+  function renderList() {
+    sortBtn.style.display = staff.length > 1 ? '' : 'none';
+    listBox.replaceChildren(staff.length === 0 ? h('div', { class: 'sub' }, 'まだ職員が登録されていません。') :
+      h('table', {}, h('tr', {}, h('th', {}, '名前'), h('th', {}, '状態'), h('th', {}, '')),
+        staff.map(s => h('tr', {},
+          h('td', { style: s.active ? '' : 'color:#999' }, s.name),
+          h('td', {}, s.active ? null : h('span', { class: 'tag gray' }, '無効'),
+            s.active && !s.pinChanged ? h('span', { class: 'tag warn' }, '初期PIN') : null,
+            s.locked ? h('span', { class: 'tag warn' }, 'ロック中') : null),
+          h('td', {}, h('div', { class: 'row' },
+            h('button', { class: 'ghost small', onclick: () => renderRename(s) }, '名前を修正'),
+            h('button', { class: 'ghost small', onclick: () => {
+              if (!confirm(s.name + ' さんのPINをリセットします。よろしいですか?')) return;
+              call('adminResetPin', S.ad.cred, s.staffId).then(r => {
+                setMsg(listMsg, h('div', { class: 'ok' }, r.name + ' さんのPINを初期PIN ', h('b', {}, r.pin), ' に戻しました(初回ログイン時に本人が変更します)'));
+                load();
+              }).catch(e => setMsg(listMsg, errBox(e.message)));
+            } }, 'PINリセット'),
+            h('button', { class: 'danger small', onclick: () => {
+              call('adminSetActive', S.ad.cred, s.staffId, !s.active).then(load).catch(e => setMsg(listMsg, errBox(e.message)));
+            } }, s.active ? '無効にする' : '有効に戻す')))))));
+  }
+
+  // ---- 名前の修正 ----
+  function renderRename(s) {
+    setMsg(listMsg, null);
+    const input = h('input', { type: 'text', maxlength: '30', value: s.name });
+    const save = h('button', { class: 'small' }, '保存');
+    save.addEventListener('click', () => {
+      const v = input.value.trim();
+      if (!v) return setMsg(listMsg, errBox('名前を入力してください。'));
+      if (v === s.name) return renderList();
+      withBusy(save, call('adminRenameStaff', S.ad.cred, s.staffId, v).then(r => {
+        setMsg(listMsg, h('div', { class: 'ok' }, '「' + s.name + '」を「' + r.name + '」に修正しました。過去の回答や管理者の指定も新しい名前で表示されます。'));
+        load();
+      }).catch(e => setMsg(listMsg, errBox(e.message))));
+    });
+    listBox.replaceChildren(h('div', { class: 'qbox' },
+      h('div', { class: 'sub' }, '「' + s.name + '」さんの名前を修正'),
+      h('div', { style: 'margin-top:6px' }, input),
+      h('div', { class: 'row', style: 'margin-top:8px' }, save, h('button', { class: 'ghost small', onclick: () => { setMsg(listMsg, null); renderList(); } }, 'やめる'))));
+    input.focus();
+  }
+
+  // ---- 並べ替え(▲▼で動かして、最後に保存) ----
+  function renderSort() {
+    setMsg(listMsg, null);
+    const order = staff.slice();
+    const wrap = h('div');
+    const save = h('button', { class: 'small' }, 'この順番で保存');
+    function move(i, d) {
+      const j = i + d;
+      if (j < 0 || j >= order.length) return;
+      const t = order[i]; order[i] = order[j]; order[j] = t;
+      draw();
+    }
+    function draw() {
+      wrap.replaceChildren(...order.map((s, i) => h('div', { class: 'sortrow' },
+        h('span', { class: 'sortno' }, String(i + 1)),
+        h('span', { class: 'sortname', style: s.active ? '' : 'color:#999' }, s.name, s.active ? null : h('span', { class: 'tag gray', style: 'margin-left:6px' }, '無効')),
+        h('button', { class: 'ghost small', disabled: i === 0, onclick: () => move(i, -1), 'aria-label': '上へ' }, '▲'),
+        h('button', { class: 'ghost small', disabled: i === order.length - 1, onclick: () => move(i, 1), 'aria-label': '下へ' }, '▼'))));
+    }
+    save.addEventListener('click', () => {
+      withBusy(save, call('adminReorderStaff', S.ad.cred, order.map(s => s.staffId)).then(() => {
+        setMsg(listMsg, h('div', { class: 'ok' }, '並び順を保存しました。回答画面の名前の一覧も、この順番になります。'));
+        load();
+      }).catch(e => setMsg(listMsg, errBox(e.message))));
+    });
+    draw();
+    sortBtn.style.display = 'none';
+    listBox.replaceChildren(h('div', { class: 'sub', style: 'margin-bottom:8px' }, '▲▼で順番を入れ替えて、「この順番で保存」を押してください。'),
+      wrap, h('div', { class: 'row', style: 'margin-top:10px' }, save, h('button', { class: 'ghost small', onclick: () => { setMsg(listMsg, null); renderList(); } }, 'やめる')));
+  }
+  sortBtn.addEventListener('click', renderSort);
+
   addBtn.addEventListener('click', () => {
     setMsg(box, null);
     const arr = names.value.split('\n').map(x => x.trim()).filter(Boolean);
@@ -490,8 +556,9 @@ function adminStaff(body) {
     }).catch(e => setMsg(box, errBox(e.message))));
   });
   body.append(h('div', { class: 'card' }, h('h2', {}, '職員を追加'), names, addBtn, box, resBox),
-    h('div', { class: 'card' }, h('h2', {}, '職員一覧'), listBox,
-      h('div', { class: 'sub', style: 'margin-top:8px' }, '職員は、回答画面の「+ 新規作成」から自分でアンケートを作成できます。作成した職員がそのアンケートの管理者になり、園長は園内のすべてのアンケートを確認できます。'),
+    h('div', { class: 'card' }, h('div', { class: 'row between' }, h('h2', { style: 'margin:0' }, '職員一覧'), sortBtn), listMsg, listBox,
+      h('div', { class: 'sub', style: 'margin-top:8px' }, 'ここでの並び順が、職員のログイン画面の名前の一覧や、回答状況の表示順になります。新しく追加した職員は一番下に入ります。'),
+      h('div', { class: 'sub', style: 'margin-top:4px' }, '職員は、回答画面の「+ 新規作成」から自分でアンケートを作成できます。作成した職員がそのアンケートの管理者になり、園長は園内のすべてのアンケートを確認できます。'),
       h('div', { class: 'sub', style: 'margin-top:4px' }, '退職・異動した方は「無効にする」を選ぶと、名前が回答画面に出なくなります(過去の回答は残ります)。')));
   load();
 }
