@@ -66,6 +66,7 @@
   .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
   .chip { padding:3px 13px; border-radius:99px; font-size:14px; border:1px solid var(--peach-line); background:var(--peach); color:var(--peach-ink); }
   .chip.done { background:#f1f1f4; border-color:#e2e2e8; color:#a6a6b3; }
+  .chip.me { font-weight:700; border-width:2px; }
   .grp { font-size:13px; font-weight:600; margin-top:12px; color:var(--ink); }
   .prog { display:flex; align-items:center; gap:10px; margin-top:8px; }
   .prog .bar { flex:1; }
@@ -159,6 +160,22 @@ function statusGroups(people) {
     h('div', { class: 'grp' }, '回答済み(' + done.length + '人)'),
     done.length ? h('div', { class: 'chips' }, done.map(p => h('span', { class: 'chip done' }, p.name))) : h('div', { class: 'sub' }, 'まだいません'));
 }
+// 職員の一覧画面に出す回答状況(回答済みはグレー・回答した順、未回答は色つき)
+function staffProgress(v) {
+  const pr = v.progress;
+  if (!pr || !pr.total) return null;
+  // 無記名は人数だけ(名前は送られてこない)
+  const people = pr.people || [];
+  const done = people.filter(p => p.done), pend = people.filter(p => !p.done);
+  return h('div', { style: 'margin-top:10px' },
+    h('div', { class: 'prog' }, h('div', { class: 'bar' }, h('i', { style: 'width:' + Math.round(pr.done * 100 / pr.total) + '%' })),
+      h('span', {}, (v.allOrg ? 'この園 ' : '') + pr.done + '/' + pr.total + '人が回答済み')),
+    v.allOrg && pr.allTotal ? h('div', { class: 'sub' }, '全園では ' + pr.allDone + '/' + pr.allTotal + '人が回答済み') : null,
+    people.length ? h('div', { class: 'chips' },
+      done.map(p => h('span', { class: 'chip done' }, p.name)),
+      pend.map(p => h('span', { class: 'chip' + (p.me ? ' me' : '') }, p.name + (p.me ? '(あなた)' : '')))) : null);
+}
+
 // 全園共通アンケートの園別回答状況(人数のバー)
 function facilityProgress(list) {
   return h('div', { class: 'fprog' }, (list || []).map(f => [
@@ -307,6 +324,7 @@ function staffList() {
             v.deadline ? h('span', { class: 'sub' }, '期限 ' + fmtDate(v.deadline)) : null),
           h('h2', { style: 'margin-top:6px' }, v.title),
           v.description ? h('div', { class: 'sub' }, v.description) : null,
+          staffProgress(v),
           h('button', { class: 'block', onclick: () => staffSurvey(v) }, '回答する'))),
     h('div', { class: 'center', style: 'margin-top:20px' }, h('button', { class: 'ghost', onclick: staffLogin }, '終了(ログアウト)')));
 }
@@ -556,9 +574,15 @@ function adminCreate() {
   const box = h('div');
   const addBtn = h('button', { class: 'ghost', onclick: () => addQ() }, '+ 設問を追加');
 
-  // ---- 対象者の選択 ----
-  const mgrSel = h('select', {}, h('option', { value: '' }, '園長のみ(指定しない)'));
-  let picks = [];   // [{ s, cb }]
+  // ---- 対象者・管理者の選択 ----
+  let picks = [];      // 対象者 [{ s, cb }]
+  let mgrPicks = [];   // 管理者 [{ s, cb }]
+  const mgrList = h('div', {}, h('div', { class: 'sub' }, '読み込み中…'));
+  const mgrCounter = h('span', { class: 'sub' });
+  function updateMgrCount() {
+    const n = mgrPicks.filter(p => p.cb.checked).length;
+    mgrCounter.textContent = n ? n + '人を選択中' : (S.ad.admin ? '選択なし(園長だけが管理します)' : '');
+  }
   const counter = h('span', { class: 'sub' });
   const tgtList = h('div', {}, h('div', { class: 'sub' }, '読み込み中…'));
   function updateCount() { counter.textContent = picks.filter(p => p.cb.checked).length + ' / ' + picks.length + '人を選択中'; }
@@ -566,7 +590,11 @@ function adminCreate() {
   // ---- 範囲(一覧のボタンで決まる。統括は常に全園共通、職員は園内のみ) ----
   const isAll = () => !!S.ad.hq || (S.ad.admin && S.ad.createScope === 'ALL');
   if (!isAll()) call('adminGetStaff', S.ad.cred).then(list => {
-    mgrSel.replaceChildren(h('option', { value: '' }, '園長のみ(指定しない)'), ...list.filter(s => s.active).map(s => h('option', { value: s.staffId }, s.name)));
+    // 管理者: 職員が作るときは本人が必ず入る(外せない)
+    const me = S.ad.admin ? '' : S.ad.cred.staffId;
+    mgrPicks = list.filter(s => s.active).map(s => ({ s: s, cb: h('input', { type: 'checkbox', checked: s.staffId === me, disabled: s.staffId === me, onchange: updateMgrCount }) }));
+    mgrList.replaceChildren(...mgrPicks.map(p => h('label', { class: 'opt' }, p.cb, h('span', {}, p.s.name, p.s.staffId === me ? h('span', { class: 'sub' }, '(あなた)') : null))));
+    updateMgrCount();
     picks = list.filter(s => s.active).map(s => ({ s: s, cb: h('input', { type: 'checkbox', checked: true, onchange: updateCount }) }));
     if (!picks.length) return tgtList.replaceChildren(h('div', { class: 'err' }, '職員が登録されていません。先に「職員」タブで登録してください。'));
     tgtList.replaceChildren(...picks.map(p => h('label', { class: 'opt' }, p.cb, h('span', {}, p.s.name))));
@@ -605,7 +633,7 @@ function adminCreate() {
     const sv = {
       title: title.value, description: desc.value, deadline: deadline.value, anonymous: anon.checked,
       scope: all ? 'ALL' : '',
-      managerId: (S.ad.admin && !all) ? mgrSel.value : '',
+      managerIds: all ? [] : mgrPicks.filter(p => p.cb.checked).map(p => p.s.staffId),
       targets: (all || (picks.length && picks.every(p => p.cb.checked))) ? 'all' : picks.filter(p => p.cb.checked).map(p => p.s.staffId),
       questions: qList.map(q => ({ text: q.text.value, type: q.type.value, options: q.opts.value.split('\n'), required: q.req.checked, low: q.low.value, high: q.high.value })),
     };
@@ -626,9 +654,10 @@ function adminCreate() {
       tgtList);
   const mgrCard = h('div', { class: 'card' },
       h('h2', {}, '管理者'),
-      S.ad.admin
-        ? [h('div', { class: 'sub' }, 'このアンケートの進捗・結果を確認し、締め切りなどの管理ができる職員を選べます(例: 行事担当)。園長は常に管理できます。'), h('div', { style: 'margin-top:8px' }, mgrSel)]
-        : h('div', { class: 'sub' }, 'このアンケートの管理者は、あなたになります。'));
+      h('div', { class: 'sub' }, 'このアンケートの進捗・結果を確認し、締め切りなどの管理ができる職員を選べます(例: 行事の担当者)。何人でも選べます。'),
+      h('div', { class: 'sub' }, S.ad.admin ? '園長は、選ばなくても常に管理できます。' : 'あなたは作成者なので、必ず管理者に入ります。'),
+      h('div', { class: 'row', style: 'margin:10px 0' }, mgrCounter),
+      mgrList);
   const allCard = h('div', { class: 'card' },
       h('h2', {}, '対象者と公開範囲'),
       h('div', { class: 'sub' }, '全園すべての職員が対象になります。結果は各園の園長と統括が見られ、園別に比べることもできます。'),
