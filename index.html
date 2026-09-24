@@ -49,6 +49,9 @@
   .tag { display:inline-block; font-size:12px; padding:2px 10px; border-radius:99px; background:var(--soft); color:var(--main-ink); margin-right:4px; font-weight:600; }
   .tag.gray { background:var(--sky); color:#3d6482; }
   .tag.warn { background:var(--pink); color:var(--pink-ink); }
+  .tag.lav { background:var(--lav); color:var(--lav-ink); }
+  .fprog { display:grid; grid-template-columns:auto 1fr auto; gap:6px 10px; align-items:center; margin-top:8px; font-size:13px; }
+  .fprog .bar { height:10px; }
   table { width:100%; border-collapse:collapse; font-size:14px; }
   th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
   .tabs { display:flex; gap:8px; margin:12px 0; flex-wrap:wrap; }
@@ -67,6 +70,13 @@
   .prog { display:flex; align-items:center; gap:10px; margin-top:8px; }
   .prog .bar { flex:1; }
   .prog span { font-size:13px; color:var(--sub); white-space:nowrap; }
+  /* 5段階評価 */
+  .scale { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; margin-top:8px; }
+  .scale label { display:flex; flex-direction:column; align-items:center; gap:4px; padding:10px 0; border:1.5px solid var(--line); border-radius:12px; background:#fff; cursor:pointer; font-weight:600; }
+  .scale label:has(input:checked) { background:var(--soft); border-color:var(--main-line); color:var(--main-ink); }
+  .scale input { transform:scale(1.2); accent-color:#8fc9b6; margin:0; }
+  .scale-ends { display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--sub); margin-top:4px; }
+  .avg { font-size:22px; font-weight:700; color:var(--main-ink); }
 </style>
 </head>
 <body>
@@ -149,19 +159,28 @@ function statusGroups(people) {
     h('div', { class: 'grp' }, '回答済み(' + done.length + '人)'),
     done.length ? h('div', { class: 'chips' }, done.map(p => h('span', { class: 'chip done' }, p.name))) : h('div', { class: 'sub' }, 'まだいません'));
 }
+// 4園共通アンケートの園別回答状況(人数のバー)
+function facilityProgress(list) {
+  return h('div', { class: 'fprog' }, (list || []).map(f => [
+    h('span', {}, f.name.replace('こども保育園', '')),
+    h('div', { class: 'bar' }, h('i', { style: 'width:' + (f.target ? Math.round(f.done * 100 / f.target) : 0) + '%' })),
+    h('span', { class: 'sub' }, f.done + '/' + f.target + '人')]));
+}
 function csvCell(v) {
   let t = Array.isArray(v) ? v.join('、') : (v === null || v === undefined ? '' : String(v));
   if (/^[=+\-@\t\r]/.test(t)) t = "'" + t;   // Excelで数式として実行されるのを防ぐ
   return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
 }
 function resultsCsv(r) {
-  const qs = r.survey.questions, anon = r.survey.anonymous;
-  const rows = [[anon ? '回答番号' : '名前'].concat(anon ? [] : ['回答状況'], qs.map((q, i) => 'Q' + (i + 1) + ' ' + q.text))];
+  const qs = r.survey.questions, anon = r.survey.anonymous, all = !!r.survey.all;
+  const fcol = all ? ['園'] : [];
+  const rows = [[anon ? '回答番号' : '名前'].concat(fcol, anon ? [] : ['回答状況'], qs.map((q, i) => 'Q' + (i + 1) + ' ' + q.text))];
   if (anon) {
-    (r.anonRows || []).forEach((a, i) => rows.push([String(i + 1)].concat(qs.map(q => a[q.id]))));
+    (r.anonRows || []).forEach((a, i) => rows.push([String(i + 1)].concat(all ? [a._f || '(非表示)'] : [], qs.map(q => a[q.id]))));
   } else {
-    (r.people || []).forEach(p => rows.push([p.name, '回答済み'].concat(qs.map(q => p.answers[q.id]))));
-    r.notCompleted.forEach(n => rows.push([n, '未回答'].concat(qs.map(() => ''))));
+    (r.people || []).forEach(p => rows.push([p.name].concat(all ? [p.facility] : [], ['回答済み'], qs.map(q => p.answers[q.id]))));
+    if (all && r.groups) r.groups.forEach(g => g.notCompleted.forEach(n => rows.push([n, g.name, '未回答'].concat(qs.map(() => '')))));
+    else r.notCompleted.forEach(n => rows.push([n, '未回答'].concat(qs.map(() => ''))));
   }
   return rows.map(row => row.map(csvCell).join(',')).join('\r\n');
 }
@@ -282,7 +301,8 @@ function staffList() {
     list.length === 0
       ? h('div', { class: 'card center' }, h('h2', {}, '回答待ちのアンケートはありません'), h('div', { class: 'sub' }, '画面を閉じて大丈夫です。'))
       : list.map(v => h('div', { class: 'card' },
-          h('div', {}, h('span', { class: 'tag' + (v.anonymous ? '' : ' gray') }, v.anonymous ? '無記名' : '記名'),
+          h('div', {}, v.allOrg ? h('span', { class: 'tag lav' }, '4園共通') : null,
+            h('span', { class: 'tag' + (v.anonymous ? '' : ' gray') }, v.anonymous ? '無記名' : '記名'),
             v.deadline ? h('span', { class: 'sub' }, '期限 ' + fmtDate(v.deadline)) : null),
           h('h2', { style: 'margin-top:6px' }, v.title),
           v.description ? h('div', { class: 'sub' }, v.description) : null,
@@ -313,6 +333,11 @@ function staffSurvey(sv) {
     if (q.type === 'text') {
       inputs[q.id] = h('textarea', { maxlength: '2000' });
       body = inputs[q.id];
+    } else if (q.type === 'scale') {
+      const name = 'q_' + q.id;
+      inputs[q.id] = q.options.map(o => h('input', { type: 'radio', name: name, value: o }));
+      body = [h('div', { class: 'scale' }, q.options.map((o, j) => h('label', {}, inputs[q.id][j], h('span', {}, o)))),
+        (q.low || q.high) ? h('div', { class: 'scale-ends' }, h('span', {}, '1: ' + (q.low || '')), h('span', {}, '5: ' + (q.high || ''))) : null];
     } else {
       const type = q.type === 'multi' ? 'checkbox' : 'radio';
       const name = 'q_' + q.id;
@@ -330,7 +355,7 @@ function staffSurvey(sv) {
     const ans = {};
     for (const q of sv.questions) {
       if (q.type === 'text') ans[q.id] = inputs[q.id].value;
-      else if (q.type === 'single') { const c = inputs[q.id].find(x => x.checked); ans[q.id] = c ? c.value : ''; }
+      else if (q.type === 'single' || q.type === 'scale') { const c = inputs[q.id].find(x => x.checked); ans[q.id] = c ? c.value : ''; }
       else ans[q.id] = inputs[q.id].filter(x => x.checked).map(x => x.value);
       const v = ans[q.id];
       if (q.required && (Array.isArray(v) ? !v.length : !String(v).trim())) return setMsg(box, errBox('「' + q.text + '」は必須です。'));
@@ -370,16 +395,18 @@ function adminLogin() {
   const box = h('div');
   const btn = h('button', { class: 'block' }, 'ログイン');
   call('getFacilities').then(list => {
-    facSel.replaceChildren(h('option', { value: '' }, '園を選んでください'), ...list.map(f => h('option', { value: f.facilityId }, f.name)));
-    const last = lsGet('lastFacility');
-    if (last && list.some(f => f.facilityId === last)) facSel.value = last;
+    facSel.replaceChildren(h('option', { value: '' }, '園を選んでください'), ...list.map(f => h('option', { value: f.facilityId }, f.name)),
+      h('option', { value: 'HQ' }, '統括(4園共通アンケート用)'));
+    const last = lsGet('lastAdmin') || lsGet('lastFacility');
+    if (last && (last === 'HQ' || list.some(f => f.facilityId === last))) facSel.value = last;
   }).catch(e => setMsg(box, errBox(e.message)));
   btn.addEventListener('click', () => {
     setMsg(box, null);
     if (!facSel.value || !pw.value) return setMsg(box, errBox('園とパスワードを入力してください。'));
     withBusy(btn, call('adminLogin', { fid: facSel.value, pw: pw.value }).then(r => {
-      lsSet('lastFacility', facSel.value);
-      S.ad = { cred: { fid: facSel.value, pw: pw.value }, admin: true, title: r.facilityName, tab: 'surveys', back: adminLogin };
+      lsSet('lastAdmin', facSel.value);
+      if (facSel.value !== 'HQ') lsSet('lastFacility', facSel.value);
+      S.ad = { cred: { fid: facSel.value, pw: pw.value }, admin: true, hq: !!r.hq, title: r.hq ? '統括(4園共通アンケート)' : r.facilityName, tab: 'surveys', back: adminLogin };
       adminMain();
     }).catch(e => setMsg(box, errBox(e.message))));
   });
@@ -388,7 +415,8 @@ function adminLogin() {
 }
 
 function adminMain() {
-  const tabs = S.ad.admin ? [['surveys', 'アンケート'], ['staff', '職員'], ['settings', '設定']] : [['surveys', 'アンケート']];
+  const tabs = S.ad.hq ? [['surveys', 'アンケート'], ['settings', '設定']]
+    : S.ad.admin ? [['surveys', 'アンケート'], ['staff', '職員'], ['settings', '設定']] : [['surveys', 'アンケート']];
   const body = h('div');
   const bar = S.ad.admin ? h('div', { class: 'tabs' }, tabs.map(t => h('button', {
     class: S.ad.tab === t[0] ? 'on' : '', onclick: () => { S.ad.tab = t[0]; adminMain(); } }, t[1]))) : null;
@@ -477,19 +505,22 @@ function adminSurveys(body) {
   call('adminGetSurveys', S.ad.cred).then(list => {
     if (!list.length) return listBox.replaceChildren(h('div', { class: 'card sub' }, 'まだアンケートがありません。「新規作成」から作りましょう。'));
     listBox.replaceChildren(...list.map(v => h('div', { class: 'card' },
-      h('div', {}, h('span', { class: 'tag' + (v.anonymous ? '' : ' gray') }, v.anonymous ? '無記名' : '記名'),
+      h('div', {}, v.all ? h('span', { class: 'tag lav' }, '4園共通') : null,
+        h('span', { class: 'tag' + (v.anonymous ? '' : ' gray') }, v.anonymous ? '無記名' : '記名'),
         h('span', { class: 'tag ' + (v.open ? '' : 'warn') }, v.open ? '受付中' : '受付終了')),
       h('h2', { style: 'margin-top:6px' }, v.title),
-      h('div', { class: 'sub' }, '管理者: ' + v.managerName + ' / 対象: ' + (v.targetAll ? '全員' : '選択した職員') + ' / 期限: ' + fmtDate(v.deadline)),
+      h('div', { class: 'sub' }, v.all
+        ? '作成: ' + v.managerName + ' / 対象: 4園の全職員 / 期限: ' + fmtDate(v.deadline)
+        : '管理者: ' + v.managerName + ' / 対象: ' + (v.targetAll ? '全員' : '選択した職員') + ' / 期限: ' + fmtDate(v.deadline)),
       h('div', { class: 'prog' }, h('div', { class: 'bar' }, h('i', { style: 'width:' + (v.target ? Math.round(v.completedActive * 100 / v.target) : 0) + '%' })), h('span', {}, v.completedActive + '/' + v.target + '人')),
-      v.people.length ? statusGroups(v.people) : null,
+      v.all ? facilityProgress(v.byFacility) : (v.people && v.people.length ? statusGroups(v.people) : null),
       h('div', { class: 'row', style: 'margin-top:10px' },
         h('button', { class: 'small', onclick: () => adminResults(v.surveyId) }, '結果'),
         h('button', { class: 'ghost small', onclick: () => adminShareText(v) }, 'Chatwork用の依頼文'),
-        h('button', { class: 'ghost small', onclick: () => {
+        v.canEdit === false ? null : h('button', { class: 'ghost small', onclick: () => {
           call('adminSetSurveyStatus', S.ad.cred, v.surveyId, v.status === 'open' ? 'closed' : 'open').then(adminMain).catch(e => setMsg(box, errBox(e.message)));
         } }, v.status === 'open' ? '受付を締め切る' : '受付を再開'),
-        h('button', { class: 'danger small', onclick: () => {
+        v.canEdit === false ? null : h('button', { class: 'danger small', onclick: () => {
           if (!confirm('「' + v.title + '」と、その回答をすべて削除します。元に戻せません。よろしいですか?')) return;
           call('adminDeleteSurvey', S.ad.cred, v.surveyId).then(adminMain).catch(e => setMsg(box, errBox(e.message)));
         } }, '削除')))));
@@ -526,7 +557,11 @@ function adminCreate() {
   const tgtList = h('div', {}, h('div', { class: 'sub' }, '読み込み中…'));
   function updateCount() { counter.textContent = picks.filter(p => p.cb.checked).length + ' / ' + picks.length + '人を選択中'; }
   function setAll(v) { picks.forEach(p => { p.cb.checked = v; }); updateCount(); }
-  call('adminGetStaff', S.ad.cred).then(list => {
+  // ---- 範囲(園長: この園だけ / 4園共通、統括: 4園共通のみ) ----
+  const scopeGarden = h('input', { type: 'radio', name: 'scope', value: '', checked: !S.ad.hq });
+  const scopeAll = h('input', { type: 'radio', name: 'scope', value: 'ALL', checked: !!S.ad.hq });
+  const isAll = () => !!S.ad.hq || scopeAll.checked;
+  if (!S.ad.hq) call('adminGetStaff', S.ad.cred).then(list => {
     mgrSel.replaceChildren(h('option', { value: '' }, '園長のみ(指定しない)'), ...list.filter(s => s.active).map(s => h('option', { value: s.staffId }, s.name)));
     picks = list.filter(s => s.active).map(s => ({ s: s, cb: h('input', { type: 'checkbox', checked: true, onchange: updateCount }) }));
     if (!picks.length) return tgtList.replaceChildren(h('div', { class: 'err' }, '職員が登録されていません。先に「職員」タブで登録してください。'));
@@ -537,16 +572,24 @@ function adminCreate() {
 
   function addQ() {
     const text = h('input', { type: 'text', placeholder: '設問文' });
-    const type = h('select', {}, h('option', { value: 'single' }, '選択式(1つ選ぶ)'), h('option', { value: 'multi' }, '選択式(複数選べる)'), h('option', { value: 'text' }, '自由記述'));
+    const type = h('select', {}, h('option', { value: 'single' }, '選択式(1つ選ぶ)'), h('option', { value: 'multi' }, '選択式(複数選べる)'), h('option', { value: 'scale' }, '5段階評価(1〜5)'), h('option', { value: 'text' }, '自由記述'));
     const opts = h('textarea', { placeholder: '選択肢を1行に1つずつ\n例:\nはい\nいいえ', style: 'min-height:80px' });
     const req = h('input', { type: 'checkbox', checked: true });
     const optWrap = h('div', {}, opts);
-    const q = { text, type, opts, req };
+    const low = h('input', { type: 'text', maxlength: '20', placeholder: '例: そう思わない' });
+    const high = h('input', { type: 'text', maxlength: '20', placeholder: '例: そう思う' });
+    const scaleWrap = h('div', { style: 'display:none' },
+      h('div', { class: 'sub' }, '1と5の意味(任意)'),
+      h('div', { class: 'row', style: 'flex-wrap:nowrap' }, h('span', { class: 'sub' }, '1:'), low, h('span', { class: 'sub' }, '5:'), high));
+    const q = { text, type, opts, req, low, high };
     const wrap = h('div', { class: 'qbox' },
       h('div', { class: 'row between' }, h('b', { class: 'qn' }), h('button', { class: 'danger small', onclick: () => { qList.splice(qList.indexOf(q), 1); wrap.remove(); renum(); } }, '削除')),
-      text, h('div', { style: 'margin-top:8px' }, type), h('div', { style: 'margin-top:8px' }, optWrap),
+      text, h('div', { style: 'margin-top:8px' }, type), h('div', { style: 'margin-top:8px' }, optWrap, scaleWrap),
       h('label', { style: 'display:block;margin-top:8px;font-size:14px' }, req, ' 必須にする'));
-    type.addEventListener('change', () => { optWrap.style.display = type.value === 'text' ? 'none' : ''; });
+    type.addEventListener('change', () => {
+      optWrap.style.display = (type.value === 'text' || type.value === 'scale') ? 'none' : '';
+      scaleWrap.style.display = type.value === 'scale' ? '' : 'none';
+    });
     q.wrap = wrap; qList.push(q); qBox.append(wrap); renum();
   }
   function renum() { qList.forEach((q, i) => { q.wrap.querySelector('.qn').textContent = '設問 ' + (i + 1); }); }
@@ -554,11 +597,13 @@ function adminCreate() {
 
   saveBtn.addEventListener('click', () => {
     setMsg(box, null);
+    const all = isAll();
     const sv = {
       title: title.value, description: desc.value, deadline: deadline.value, anonymous: anon.checked,
-      managerId: S.ad.admin ? mgrSel.value : '',
-      targets: (picks.length && picks.every(p => p.cb.checked)) ? 'all' : picks.filter(p => p.cb.checked).map(p => p.s.staffId),
-      questions: qList.map(q => ({ text: q.text.value, type: q.type.value, options: q.opts.value.split('\n'), required: q.req.checked })),
+      scope: all ? 'ALL' : '',
+      managerId: (S.ad.admin && !all) ? mgrSel.value : '',
+      targets: (all || (picks.length && picks.every(p => p.cb.checked))) ? 'all' : picks.filter(p => p.cb.checked).map(p => p.s.staffId),
+      questions: qList.map(q => ({ text: q.text.value, type: q.type.value, options: q.opts.value.split('\n'), required: q.req.checked, low: q.low.value, high: q.high.value })),
     };
     withBusy(saveBtn, call('adminCreateSurvey', S.ad.cred, sv).then(r => {
       call('adminGetSurveys', S.ad.cred).then(list => {
@@ -568,91 +613,160 @@ function adminCreate() {
     }).catch(e => setMsg(box, errBox(e.message))));
   });
 
-  show(h('button', { class: 'ghost small', onclick: S.ad.createFrom === 'staff' ? staffLoadList : adminMain }, '← 戻る'), h('h1', {}, 'アンケートを作成'),
+  const targetCard = h('div', { class: 'card' },
+      h('h2', {}, '対象者'),
+      h('div', { class: 'sub' }, '回答をお願いする職員を選びます。選ばれた職員にだけ、このアンケートが表示されます。'),
+      h('div', { class: 'row', style: 'margin:10px 0' },
+        h('button', { class: 'small', onclick: () => setAll(true) }, '全員を選択'),
+        h('button', { class: 'ghost small', onclick: () => setAll(false) }, '全員を外す'), counter),
+      tgtList);
+  const mgrCard = h('div', { class: 'card' },
+      h('h2', {}, '管理者'),
+      S.ad.admin
+        ? [h('div', { class: 'sub' }, 'このアンケートの進捗・結果を確認し、締め切りなどの管理ができる職員を選べます(例: 行事担当)。園長は常に管理できます。'), h('div', { style: 'margin-top:8px' }, mgrSel)]
+        : h('div', { class: 'sub' }, 'このアンケートの管理者は、あなたになります。'));
+  const allCard = h('div', { class: 'card' },
+      h('h2', {}, '対象者と公開範囲'),
+      h('div', { class: 'sub' }, '4園すべての職員が対象になります。結果は各園の園長と統括が見られ、園別に比べることもできます。'),
+      h('div', { class: 'sub', style: 'margin-top:4px' }, '締め切り・削除は、作成した人と統括が行えます。'));
+  const scopeCard = (S.ad.admin && !S.ad.hq) ? h('div', { class: 'card' },
+      h('h2', {}, '範囲'),
+      h('label', { class: 'opt' }, scopeGarden, h('span', {}, h('b', {}, 'この園だけ'), h('div', { class: 'sub' }, 'いつものアンケート。他の園からは見えません。'))),
+      h('label', { class: 'opt' }, scopeAll, h('span', {}, h('b', {}, '4園共通'), h('div', { class: 'sub' }, '4園の全職員が対象。結果は各園長と統括が見られます。')))) : null;
+  function applyScope() {
+    const a = isAll();
+    targetCard.style.display = a ? 'none' : '';
+    mgrCard.style.display = a ? 'none' : '';
+    allCard.style.display = a ? '' : 'none';
+  }
+  scopeGarden.addEventListener('change', applyScope);
+  scopeAll.addEventListener('change', applyScope);
+  applyScope();
+
+  show(h('button', { class: 'ghost small', onclick: S.ad.createFrom === 'staff' ? staffLoadList : adminMain }, '← 戻る'),
+    h('h1', {}, S.ad.hq ? '4園共通アンケートを作成' : 'アンケートを作成'),
+    scopeCard,
     h('div', { class: 'card' },
       h('label', { class: 'f' }, 'タイトル'), title, h('label', { class: 'f' }, '説明(任意)'), desc,
       h('label', { class: 'f' }, '回答期限(任意・この日の終わりまで回答できます)'), deadline,
       h('label', { class: 'f' }, '回答方式'),
       h('label', { class: 'opt' }, named, h('span', {}, h('b', {}, '記名'), h('div', { class: 'sub' }, '誰が回答したか分かります。未回答者の確認もできます。'))),
       h('label', { class: 'opt' }, anon, h('span', {}, h('b', {}, '無記名'), h('div', { class: 'sub' }, '回答内容は名前と紐づけません。未回答者(回答済みかどうか)だけ確認できます。'))),
-      h('div', { class: 'note' }, '無記名の結果は、回答が' + '3件以上' + 'たまってから表示されます(少人数で個人が特定されるのを防ぐため)。')),
-    h('div', { class: 'card' },
-      h('h2', {}, '対象者'),
-      h('div', { class: 'sub' }, '回答をお願いする職員を選びます。選ばれた職員にだけ、このアンケートが表示されます。'),
-      h('div', { class: 'row', style: 'margin:10px 0' },
-        h('button', { class: 'small', onclick: () => setAll(true) }, '全員を選択'),
-        h('button', { class: 'ghost small', onclick: () => setAll(false) }, '全員を外す'), counter),
-      tgtList),
-    h('div', { class: 'card' },
-      h('h2', {}, '管理者'),
-      S.ad.admin
-        ? [h('div', { class: 'sub' }, 'このアンケートの進捗・結果を確認し、締め切りなどの管理ができる職員を選べます(例: 行事担当)。園長は常に管理できます。'), h('div', { style: 'margin-top:8px' }, mgrSel)]
-        : h('div', { class: 'sub' }, 'このアンケートの管理者は、あなたになります。')),
+      h('div', { class: 'note' }, '無記名の結果は、回答が' + '3件以上' + 'たまってから表示されます(少人数で個人が特定されるのを防ぐため)。4園共通の園別集計も、園ごとに3件以上で表示されます。')),
+    targetCard, mgrCard, allCard,
     h('h3', {}, '設問'), qBox, addBtn, box, saveBtn);
 }
 
 function adminResults(surveyId) {
-  const box = h('div');
-  show(h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る'), box, h('div', { class: 'sub' }, '読み込み中…'));
+  show(h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る'), h('div', { class: 'sub' }, '読み込み中…'));
   call('adminGetResults', S.ad.cred, surveyId).then(r => {
     const sv = r.survey;
-    const nodes = [
+    const head = [
       h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る'),
-      h('div', { style: 'margin-top:8px' }, h('span', { class: 'tag' + (sv.anonymous ? '' : ' gray') }, sv.anonymous ? '無記名' : '記名'),
+      h('div', { style: 'margin-top:8px' }, sv.all ? h('span', { class: 'tag lav' }, '4園共通') : null,
+        h('span', { class: 'tag' + (sv.anonymous ? '' : ' gray') }, sv.anonymous ? '無記名' : '記名'),
         h('span', { class: 'tag ' + (sv.open ? '' : 'warn') }, sv.open ? '受付中' : '受付終了')),
       h('h1', {}, sv.title),
       h('div', { class: 'sub' }, '回答 ' + r.count + '件 / 期限: ' + fmtDate(sv.deadline)),
     ];
+    // CSV(全体分。4園共通では「園」の列が付く)
     if (!r.hidden) {
       const csv = resultsCsv(r);
       const fname = (sv.title.replace(/[\\/:*?"<>|.\s]+/g, '_').slice(0, 40) || 'アンケート') + '_結果.csv';
       const dlMsg = h('span', { class: 'sub' });
-      nodes.push(h('div', { class: 'card' },
+      head.push(h('div', { class: 'card' },
         h('div', { class: 'row' }, h('button', { class: 'small', onclick: () => {
           try { downloadCsv(fname, csv); dlMsg.textContent = 'ダウンロードしました(' + fname + ')'; }
           catch (e) { dlMsg.textContent = 'ダウンロードできませんでした。下の「コピー」を使ってください。'; }
         } }, 'CSVをダウンロード'), dlMsg),
         h('details', { style: 'margin-top:8px' }, h('summary', { class: 'sub' }, 'ダウンロードできない場合はこちら(コピーして貼り付け)'), copyBox(csv, 'CSVをコピー'))));
     }
-    if (r.hidden) {
-      nodes.push(h('div', { class: 'note' }, '無記名アンケートのため、回答が' + r.minAnon + '件以上になるまで結果は表示されません(現在 ' + r.count + '件)。'));
-    } else {
-      sv.questions.forEach((q, i) => {
-        const s = r.summary.find(x => x.id === q.id);
-        const card = h('div', { class: 'card' }, h('div', { style: 'font-weight:600' }, (i + 1) + '. ' + q.text));
-        if (q.type === 'text') {
-          if (!s.texts.length) card.append(h('div', { class: 'sub' }, '回答なし'));
-          s.texts.forEach(t => card.append(h('div', { class: 'txt' }, t)));
-        } else {
-          const total = Math.max(r.count, 1);
-          q.options.forEach(o => {
-            const c = s.counts[o] || 0;
-            const pct = Math.round(c * 100 / total);
-            card.append(h('div', { class: 'bl' }, h('span', {}, o), h('span', {}, c + '人 (' + pct + '%)')),
-              h('div', { class: 'bar' }, h('i', { style: 'width:' + pct + '%' })));
-          });
-        }
-        nodes.push(card);
-      });
-      if (r.people) {
-        nodes.push(h('div', { class: 'card' }, h('h2', {}, '個人別の回答'),
-          r.people.length === 0 ? h('div', { class: 'sub' }, 'まだ回答がありません。') :
-          h('div', { style: 'overflow-x:auto' }, h('table', {},
-            h('tr', {}, h('th', {}, '名前'), sv.questions.map((q, i) => h('th', {}, (i + 1) + '. ' + q.text))),
-            r.people.map(p => h('tr', {}, h('td', {}, p.name),
-              sv.questions.map(q => { const v = p.answers[q.id]; return h('td', {}, Array.isArray(v) ? v.join('、') : v); })))))));
+
+    const view = h('div');
+    // 4園共通: 「4園全体」と各園を切り替えて表示
+    let tabBar = null;
+    if (sv.all && r.groups) {
+      const keys = [['', '4園全体']].concat(r.groups.map(g => [g.facilityId, g.name.replace('こども保育園', '')]));
+      const btns = keys.map(k => h('button', { onclick: () => select(k[0]) }, k[1]));
+      tabBar = h('div', { class: 'tabs' }, btns);
+      function select(key) {
+        btns.forEach((b, i) => { b.className = keys[i][0] === key ? 'on' : ''; });
+        renderScope(key ? r.groups.find(g => g.facilityId === key) : null);
       }
+      select('');
+    } else {
+      renderScope(null);
     }
-    const nc = r.notCompleted;
-    const reminder = '【アンケート回答のお願い】\n' + sv.title + '\n'
-      + (sv.deadline ? '回答期限: ' + fmtDate(sv.deadline) + '\n' : '')
-      + '\nまだ回答が届いていない方がいます。お手数ですが、ご回答をお願いします。\n'
-      + '\n未回答: ' + (nc.length ? nc.join('、') : 'なし') + '\n\n▼回答はこちら\n' + surveyUrl(sv.surveyId);
-    const people = r.notCompleted.map(n => ({ name: n, done: false })).concat(r.completed.map(n => ({ name: n, done: true })));
-    nodes.push(h('div', { class: 'card' }, h('h2', {}, '回答状況'), statusGroups(people),
-      sv.anonymous ? h('div', { class: 'sub', style: 'margin-top:8px' }, '無記名でも、回答済みかどうかは記録されるため確認できます(回答内容とは紐づきません)。') : null,
-      nc.length ? h('div', { style: 'margin-top:12px' }, h('b', {}, 'Chatwork用の催促文'), copyBox(reminder, 'コピー')) : null));
-    show(...nodes);
+
+    // g: null = 全体、それ以外は園ごとのデータ
+    function renderScope(g) {
+      const count = g ? g.count : r.count;
+      const hidden = g ? g.hidden : r.hidden;
+      const summary = g ? g.summary : r.summary;
+      const nodes = [];
+      if (g) nodes.push(h('div', { class: 'sub' }, g.name + 'の回答 ' + g.count + '件'));
+      if (hidden) {
+        nodes.push(h('div', { class: 'note' }, '無記名アンケートのため、' + (g ? 'この園の' : '') + '回答が' + r.minAnon + '件以上になるまで結果は表示されません(現在 ' + count + '件)。'));
+      } else {
+        sv.questions.forEach((q, i) => nodes.push(questionCard(q, i, summary.find(x => x.id === q.id), count)));
+        if (r.people) {
+          const people = g ? r.people.filter(p => p.facility === g.name) : r.people;
+          nodes.push(h('div', { class: 'card' }, h('h2', {}, '個人別の回答'),
+            people.length === 0 ? h('div', { class: 'sub' }, 'まだ回答がありません。') :
+            h('div', { style: 'overflow-x:auto' }, h('table', {},
+              h('tr', {}, h('th', {}, '名前'), sv.all && !g ? h('th', {}, '園') : null, sv.questions.map((q, i) => h('th', {}, (i + 1) + '. ' + q.text))),
+              people.map(p => h('tr', {}, h('td', {}, p.name), sv.all && !g ? h('td', {}, p.facility.replace('こども保育園', '')) : null,
+                sv.questions.map(q => { const v = p.answers[q.id]; return h('td', {}, Array.isArray(v) ? v.join('、') : v); })))))));
+        }
+      }
+      nodes.push(statusCard(g));
+      view.replaceChildren(...nodes.filter(Boolean));
+    }
+
+    function questionCard(q, i, s, count) {
+      const card = h('div', { class: 'card' }, h('div', { style: 'font-weight:600' }, (i + 1) + '. ' + q.text));
+      if (q.type === 'text') {
+        if (!s.texts.length) card.append(h('div', { class: 'sub' }, '回答なし'));
+        s.texts.forEach(t => card.append(h('div', { class: 'txt' }, t)));
+        return card;
+      }
+      const total = Math.max(count, 1);
+      if (q.type === 'scale') {
+        const n = q.options.reduce((a, o) => a + (s.counts[o] || 0), 0);
+        const sum = q.options.reduce((a, o) => a + Number(o) * (s.counts[o] || 0), 0);
+        card.append(h('div', { style: 'margin-top:6px' }, h('span', { class: 'sub' }, '平均 '),
+          h('span', { class: 'avg' }, n ? (sum / n).toFixed(1) : '−'), h('span', { class: 'sub' }, ' / 5(' + n + '人が回答)')));
+        if (q.low || q.high) card.append(h('div', { class: 'scale-ends' }, h('span', {}, '1: ' + (q.low || '')), h('span', {}, '5: ' + (q.high || ''))));
+      }
+      q.options.forEach(o => {
+        const c = s.counts[o] || 0;
+        const pct = Math.round(c * 100 / total);
+        card.append(h('div', { class: 'bl' }, h('span', {}, o), h('span', {}, c + '人 (' + pct + '%)')),
+          h('div', { class: 'bar' }, h('i', { style: 'width:' + pct + '%' })));
+      });
+      return card;
+    }
+
+    // 回答状況と催促文。4園全体では園ごとに分けて表示する
+    function statusCard(g) {
+      const groups = g ? [g] : (sv.all && r.groups ? r.groups : [{ name: '', completed: r.completed, notCompleted: r.notCompleted }]);
+      const blocks = groups.map(x => {
+        const people = x.notCompleted.map(n => ({ name: n, done: false })).concat(x.completed.map(n => ({ name: n, done: true })));
+        return h('div', {}, (sv.all && !g) ? h('h3', {}, x.name) : null, statusGroups(people));
+      });
+      const pendLines = groups.filter(x => x.notCompleted.length).map(x => (sv.all ? x.name.replace('こども保育園', '') + ': ' : '') + x.notCompleted.join('、'));
+      const reminder = '【アンケート回答のお願い】\n' + sv.title + '\n'
+        + (sv.deadline ? '回答期限: ' + fmtDate(sv.deadline) + '\n' : '')
+        + '\nまだ回答が届いていない方がいます。お手数ですが、ご回答をお願いします。\n'
+        + '\n未回答:\n' + pendLines.join('\n') + '\n\n▼回答はこちら\n' + surveyUrl(sv.surveyId);
+      return h('div', { class: 'card' }, h('h2', {}, '回答状況' + (g ? '(' + g.name + ')' : '')), blocks,
+        sv.anonymous ? h('div', { class: 'sub', style: 'margin-top:8px' }, '無記名でも、回答済みかどうかは記録されるため確認できます(回答内容とは紐づきません)。') : null,
+        pendLines.length ? h('div', { style: 'margin-top:12px' }, h('b', {}, 'Chatwork用の催促文'),
+          sv.all && !g ? h('div', { class: 'sub' }, '園ごとのボタンに切り替えると、その園の未回答者だけの催促文になります。') : null,
+          copyBox(reminder, 'コピー')) : null);
+    }
+
+    show(...head, tabBar, view);
   }).catch(e => show(h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る'), errBox(e.message)));
 }
 
