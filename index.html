@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>職員アンケート</title>
+<style>
+  :root {
+    --bg:#fbf7fb; --card:#ffffff; --ink:#43405a; --sub:#8b88a0; --line:#ebe5f3;
+    --main:#a9d8c8; --main-ink:#2d5f52; --main-line:#8fc9b6;
+    --lav:#ddd6f7; --lav-ink:#4a3f85;
+    --pink:#ffdfe0; --pink-ink:#a4404f; --pink-line:#f6b9bf;
+    --peach:#ffe6d5; --peach-ink:#9a4f2c; --peach-line:#f7c4a5;
+    --sky:#d9ecfa; --soft:#eef8f4;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:linear-gradient(180deg,#fdf4f8 0%,#f4f7fd 55%,#f2faf6 100%); background-attachment:fixed; color:var(--ink); font-family:-apple-system,"Hiragino Sans","Noto Sans JP",Meiryo,sans-serif; line-height:1.65; }
+  #app { max-width:720px; margin:0 auto; padding:16px 16px 48px; }
+  h1 { font-size:20px; margin:8px 0 4px; }
+  h2 { font-size:17px; margin:0 0 8px; }
+  h3 { font-size:15px; margin:16px 0 6px; }
+  .sub { color:var(--sub); font-size:13px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:18px; margin:14px 0; box-shadow:0 4px 14px rgba(150,130,190,.10); }
+  label.f { display:block; font-weight:600; font-size:14px; margin:12px 0 4px; }
+  input[type=text], input[type=password], input[type=date], input[type=tel], select, textarea {
+    width:100%; padding:11px 13px; font-size:16px; border:1.5px solid var(--line); border-radius:12px; background:#fffefe; color:var(--ink); font-family:inherit;
+  }
+  input:focus, select:focus, textarea:focus { outline:none; border-color:#bdb2ee; box-shadow:0 0 0 3px #ece8fb; }
+  textarea { min-height:90px; resize:vertical; }
+  button { font-family:inherit; font-size:16px; padding:11px 18px; border-radius:12px; border:1.5px solid var(--main-line); background:var(--main); color:var(--main-ink); font-weight:600; cursor:pointer; transition:filter .15s, transform .05s; }
+  button:hover { filter:brightness(.97); }
+  button:active { transform:translateY(1px); }
+  button:disabled { opacity:.5; cursor:default; }
+  button.ghost { background:#fff; color:var(--lav-ink); border-color:var(--lav); }
+  button.ghost:hover { background:#f6f3fe; filter:none; }
+  button.danger { background:#fff; color:var(--pink-ink); border-color:var(--pink-line); }
+  button.danger:hover { background:var(--pink); filter:none; }
+  button.small { font-size:13px; padding:6px 12px; border-radius:10px; }
+  button.block { width:100%; margin-top:16px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .row.between { justify-content:space-between; }
+  .err { background:var(--pink); color:var(--pink-ink); border:1px solid var(--pink-line); border-radius:12px; padding:10px 14px; margin:12px 0; font-size:14px; }
+  .ok { background:var(--soft); color:var(--main-ink); border:1px solid #cfe9df; border-radius:12px; padding:10px 14px; margin:12px 0; font-size:14px; }
+  .note { background:#fff7e3; color:#7a6330; border:1px solid #f5e5b5; border-radius:12px; padding:10px 14px; font-size:13px; margin:12px 0; }
+  .opt { display:flex; gap:10px; align-items:flex-start; padding:10px 14px; border:1.5px solid var(--line); border-radius:12px; margin:6px 0; cursor:pointer; background:#fff; }
+  .opt input { margin-top:5px; transform:scale(1.2); accent-color:#8fc9b6; }
+  .opt:has(input:checked) { background:var(--soft); border-color:var(--main-line); }
+  .req { color:var(--pink-ink); font-size:12px; margin-left:6px; }
+  .tag { display:inline-block; font-size:12px; padding:2px 10px; border-radius:99px; background:var(--soft); color:var(--main-ink); margin-right:4px; font-weight:600; }
+  .tag.gray { background:var(--sky); color:#3d6482; }
+  .tag.warn { background:var(--pink); color:var(--pink-ink); }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  .tabs { display:flex; gap:8px; margin:12px 0; flex-wrap:wrap; }
+  .tabs button { background:#fff; color:var(--lav-ink); border-color:var(--lav); }
+  .tabs button.on { background:var(--lav); color:var(--lav-ink); border-color:#c9bff0; }
+  .bar { height:12px; background:#f0ecf7; border-radius:99px; overflow:hidden; }
+  .bar > i { display:block; height:100%; background:linear-gradient(90deg,#a9d8c8,#a8cff0); border-radius:99px; }
+  .bl { display:flex; justify-content:space-between; font-size:14px; margin-top:8px; gap:8px; }
+  .qbox { border:1.5px dashed #d9d0ec; border-radius:14px; padding:12px; margin:10px 0; background:#fdfcff; }
+  .txt { background:#fbf9fe; border:1px solid var(--line); border-radius:12px; padding:8px 12px; margin:6px 0; white-space:pre-wrap; font-size:14px; }
+  .center { text-align:center; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .chip { padding:3px 13px; border-radius:99px; font-size:14px; border:1px solid var(--peach-line); background:var(--peach); color:var(--peach-ink); }
+  .chip.done { background:#f1f1f4; border-color:#e2e2e8; color:#a6a6b3; }
+  .grp { font-size:13px; font-weight:600; margin-top:12px; color:var(--ink); }
+  .prog { display:flex; align-items:center; gap:10px; margin-top:8px; }
+  .prog .bar { flex:1; }
+  .prog span { font-size:13px; color:var(--sub); white-space:nowrap; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ====== GASの窓口(データの読み書きだけを担当) ======
+// GASのデプロイを「新バージョン」で更新する限り、このURLは変わりません。
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbzArLDP5bk6o9l0yoN1SCvu0aT69dIKvM-hYlCTYMHhZDgvWSfpCr2Ez9cNekm0DHNP/exec';
+
+// 起動情報はこのページのURLから読み取る(?s=アンケートID / ?admin=1)
+const BOOT = (() => {
+  const p = new URLSearchParams(location.search);
+  return {
+    mode: p.has('admin') ? 'admin' : 'staff',
+    surveyId: String(p.get('s') || '').replace(/[^A-Za-z0-9]/g, ''),
+    baseUrl: location.origin + location.pathname,
+  };
+})();
+const app = document.getElementById('app');
+const S = {};   // 画面状態(メモリ上のみ。端末には保存しない)
+
+// ---------- 小道具 ----------
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  Object.keys(attrs || {}).forEach(k => {
+    const v = attrs[k];
+    if (k === 'class') el.className = v;
+    else if (k.slice(0, 2) === 'on') el.addEventListener(k.slice(2), v);
+    else if (k === 'value') el.value = v;
+    else if (k === 'checked') el.checked = !!v;
+    else if (k === 'disabled') el.disabled = !!v;
+    else el.setAttribute(k, v);
+  });
+  kids.flat(Infinity).forEach(c => {
+    if (c === null || c === undefined || c === false) return;
+    el.append(c.nodeType ? c : document.createTextNode(String(c)));
+  });
+  return el;
+}
+// GASの関数を呼び出す。Googleのログイン情報(Cookie)は送らないので、
+// ブラウザに複数アカウントでログインしていても影響を受けない。
+// text/plain で送るのは、GASが受け付けられない事前確認(CORSプリフライト)を避けるため。
+async function call(fn, ...args) {
+  let res;
+  try {
+    res = await fetch(GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ fn: fn, args: args }),
+      credentials: 'omit',
+      redirect: 'follow',
+    });
+  } catch (e) {
+    throw new Error('通信エラーです。電波の良いところで、もう一度お試しください。');
+  }
+  let r;
+  try { r = await res.json(); } catch (e) { throw new Error('通信エラーです。時間をおいて、もう一度お試しください。'); }
+  if (r && r.ok) return r.data;
+  throw new Error(r && r.error ? r.error : '通信エラー');
+}
+function show(...nodes) {
+  app.replaceChildren(...nodes.flat(Infinity).filter(n => n !== null && n !== undefined && n !== false));
+  try { window.scrollTo(0, 0); } catch (e) {}
+}
+function errBox(msg) { return h('div', { class: 'err' }, msg); }
+function setMsg(box, node) { box.replaceChildren(...(node ? [node] : [])); }
+function withBusy(btn, promise) {
+  btn.disabled = true;
+  return promise.finally(() => { btn.disabled = false; });
+}
+function lsGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function fmtDate(d) { return d ? d.replace(/^(\d{4})-(\d{2})-(\d{2})$/, (m, y, mo, da) => y + '年' + Number(mo) + '月' + Number(da) + '日') : 'なし'; }
+function statusGroups(people) {
+  // people: [{ name, done }] → 未回答(色つき) と 回答済み(グレー) を分けて表示
+  const pend = people.filter(p => !p.done), done = people.filter(p => p.done);
+  return h('div', {},
+    h('div', { class: 'grp' }, '未回答(' + pend.length + '人)'),
+    pend.length ? h('div', { class: 'chips' }, pend.map(p => h('span', { class: 'chip' }, p.name))) : h('div', { class: 'sub' }, '全員回答済みです'),
+    h('div', { class: 'grp' }, '回答済み(' + done.length + '人)'),
+    done.length ? h('div', { class: 'chips' }, done.map(p => h('span', { class: 'chip done' }, p.name))) : h('div', { class: 'sub' }, 'まだいません'));
+}
+function csvCell(v) {
+  let t = Array.isArray(v) ? v.join('、') : (v === null || v === undefined ? '' : String(v));
+  if (/^[=+\-@\t\r]/.test(t)) t = "'" + t;   // Excelで数式として実行されるのを防ぐ
+  return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+}
+function resultsCsv(r) {
+  const qs = r.survey.questions, anon = r.survey.anonymous;
+  const rows = [[anon ? '回答番号' : '名前'].concat(anon ? [] : ['回答状況'], qs.map((q, i) => 'Q' + (i + 1) + ' ' + q.text))];
+  if (anon) {
+    (r.anonRows || []).forEach((a, i) => rows.push([String(i + 1)].concat(qs.map(q => a[q.id]))));
+  } else {
+    (r.people || []).forEach(p => rows.push([p.name, '回答済み'].concat(qs.map(q => p.answers[q.id]))));
+    r.notCompleted.forEach(n => rows.push([n, '未回答'].concat(qs.map(() => ''))));
+  }
+  return rows.map(row => row.map(csvCell).join(',')).join('\r\n');
+}
+function downloadCsv(name, text) {
+  const blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' });   // BOM付き(Excelで文字化けしない)
+  const url = URL.createObjectURL(blob);
+  const a = h('a', { href: url, download: name });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+function copyBox(text, label) {
+  const ta = h('textarea', { style: 'min-height:150px;' });
+  ta.value = text;
+  const msg = h('span', { class: 'sub' });
+  const btn = h('button', { class: 'small', onclick: async () => {
+    try { await navigator.clipboard.writeText(ta.value); msg.textContent = 'コピーしました'; }
+    catch (e) { ta.select(); try { document.execCommand('copy'); msg.textContent = 'コピーしました'; } catch (e2) { msg.textContent = '選択したので、長押し/右クリックでコピーしてください'; } }
+  } }, label || 'コピー');
+  return h('div', {}, ta, h('div', { class: 'row', style: 'margin-top:6px' }, btn, msg));
+}
+
+// ====================================================
+//  職員用
+// ====================================================
+function staffLogin() {
+  S.st = null;
+  const facSel = h('select', {}, h('option', { value: '' }, '読み込み中…'));
+  const nameSel = h('select', { disabled: true }, h('option', { value: '' }, '先に園を選んでください'));
+  const pin = h('input', { type: 'password', inputmode: 'numeric', pattern: '[0-9]*', maxlength: '4', autocomplete: 'off', placeholder: '4桁の数字' });
+  const box = h('div');
+  const btn = h('button', { class: 'block' }, 'ログイン');
+
+  function loadStaff() {
+    const fid = facSel.value;
+    nameSel.replaceChildren(h('option', { value: '' }, '読み込み中…'));
+    nameSel.disabled = true;
+    if (!fid) { nameSel.replaceChildren(h('option', { value: '' }, '先に園を選んでください')); return; }
+    lsSet('lastFacility', fid);
+    call('getStaffNames', fid).then(list => {
+      nameSel.replaceChildren(h('option', { value: '' }, '名前を選んでください'),
+        ...list.map(s => h('option', { value: s.staffId }, s.name)));
+      nameSel.disabled = false;
+    }).catch(e => setMsg(box, errBox(e.message)));
+  }
+  facSel.addEventListener('change', loadStaff);
+
+  call('getFacilities').then(list => {
+    const last = lsGet('lastFacility');
+    facSel.replaceChildren(h('option', { value: '' }, '園を選んでください'),
+      ...list.map(f => h('option', { value: f.facilityId }, f.name)));
+    if (last && list.some(f => f.facilityId === last)) { facSel.value = last; loadStaff(); }
+  }).catch(e => setMsg(box, errBox(e.message)));
+
+  btn.addEventListener('click', () => {
+    setMsg(box, null);
+    if (!facSel.value || !nameSel.value) return setMsg(box, errBox('園と名前を選んでください。'));
+    if (!/^\d{4}$/.test(pin.value)) return setMsg(box, errBox('PINは4桁の数字で入力してください。'));
+    const staffId = nameSel.value, p = pin.value;
+    withBusy(btn, call('staffLogin', staffId, p).then(r => {
+      S.st = { staffId: staffId, pin: p, name: r.name };
+      if (r.mustChangePin) return staffChangePin();
+      S.st.surveys = r.surveys; S.st.answered = r.answered; S.st.managed = r.managed;
+      staffAfterLogin();
+    }).catch(e => setMsg(box, errBox(e.message))));
+  });
+
+  show(h('h1', {}, '職員アンケート'),
+    h('div', { class: 'sub' }, '園と名前を選び、PINを入力してください。'),
+    h('div', { class: 'card' },
+      h('label', { class: 'f' }, '園'), facSel,
+      h('label', { class: 'f' }, '名前'), nameSel,
+      h('label', { class: 'f' }, 'PIN(4桁)'), pin,
+      box, btn),
+    h('div', { class: 'note' }, 'この端末にはログイン情報を残しません。共有のスマホでも安心して使えます。PINを忘れたときは園長に伝えてください。'));
+}
+
+function staffChangePin() {
+  const np = h('input', { type: 'password', inputmode: 'numeric', maxlength: '4', autocomplete: 'off', placeholder: '新しい4桁' });
+  const np2 = h('input', { type: 'password', inputmode: 'numeric', maxlength: '4', autocomplete: 'off', placeholder: 'もう一度' });
+  const box = h('div');
+  const btn = h('button', { class: 'block' }, 'PINを変更して進む');
+  btn.addEventListener('click', () => {
+    setMsg(box, null);
+    if (!/^\d{4}$/.test(np.value)) return setMsg(box, errBox('4桁の数字で入力してください。'));
+    if (np.value !== np2.value) return setMsg(box, errBox('2回の入力が一致しません。'));
+    withBusy(btn, call('staffChangePin', S.st.staffId, S.st.pin, np.value).then(r => {
+      S.st.pin = np.value; S.st.surveys = r.surveys; S.st.answered = r.answered; S.st.managed = r.managed;
+      staffAfterLogin();
+    }).catch(e => setMsg(box, errBox(e.message))));
+  });
+  show(h('h1', {}, S.st.name + ' さん'),
+    h('div', { class: 'card' },
+      h('h2', {}, 'はじめに、自分のPINを決めてください'),
+      h('div', { class: 'sub' }, '初期PIN(0000)は今回だけ使います。次回からは、ここで決めた番号を使います。'),
+      h('label', { class: 'f' }, '新しいPIN(4桁の数字)'), np,
+      h('label', { class: 'f' }, '確認'), np2, box, btn));
+}
+
+function staffAfterLogin() {
+  if (BOOT.surveyId && !S.st.shownDirect) {
+    S.st.shownDirect = true;
+    const sv = S.st.surveys.find(v => v.surveyId === BOOT.surveyId);
+    if (sv) return staffSurvey(sv);
+    S.st.notice = S.st.answered.indexOf(BOOT.surveyId) >= 0
+      ? 'このアンケートは回答済みです。ありがとうございました。'
+      : 'このアンケートは受付を終了しているか、対象外です。';
+  }
+  staffList();
+}
+
+function staffList() {
+  const list = S.st.surveys;
+  show(h('div', { class: 'row between' }, h('h1', {}, S.st.name + ' さん'), h('button', { class: 'ghost small', onclick: staffLogin }, 'ログアウト')),
+    h('div', { class: 'row', style: 'margin:10px 0' },
+      h('button', { onclick: openCreate }, '+ 新規作成'),
+      S.st.managed > 0 ? h('button', { class: 'ghost', onclick: openManage }, '自分が担当しているアンケートの管理(' + S.st.managed + ')') : null),
+    S.st.notice ? h('div', { class: 'note' }, S.st.notice) : null,
+    list.length === 0
+      ? h('div', { class: 'card center' }, h('h2', {}, '回答待ちのアンケートはありません'), h('div', { class: 'sub' }, '画面を閉じて大丈夫です。'))
+      : list.map(v => h('div', { class: 'card' },
+          h('div', {}, h('span', { class: 'tag' + (v.anonymous ? '' : ' gray') }, v.anonymous ? '無記名' : '記名'),
+            v.deadline ? h('span', { class: 'sub' }, '期限 ' + fmtDate(v.deadline)) : null),
+          h('h2', { style: 'margin-top:6px' }, v.title),
+          v.description ? h('div', { class: 'sub' }, v.description) : null,
+          h('button', { class: 'block', onclick: () => staffSurvey(v) }, '回答する'))),
+    h('div', { class: 'center', style: 'margin-top:20px' }, h('button', { class: 'ghost', onclick: staffLogin }, '終了(ログアウト)')));
+}
+
+function staffAdminCtx() {
+  S.ad = { cred: { staffId: S.st.staffId, pin: S.st.pin }, admin: false,
+    title: S.st.name + ' さん(担当アンケートの管理)', tab: 'surveys', back: staffLoadList, createFrom: '' };
+}
+// 管理画面から回答画面へ戻るとき、担当件数などを最新にするため再取得する
+function staffLoadList() {
+  call('staffLogin', S.st.staffId, S.st.pin).then(r => {
+    S.st.surveys = r.surveys; S.st.answered = r.answered; S.st.managed = r.managed; staffList();
+  }).catch(() => staffList());
+}
+function openManage() { staffAdminCtx(); adminMain(); }
+// 回答画面から直接作成(ログインした職員が自動的にそのアンケートの管理者になる)
+function openCreate() { staffAdminCtx(); S.ad.createFrom = 'staff'; adminCreate(); }
+
+function staffSurvey(sv) {
+  S.st.notice = '';
+  const inputs = {};
+  const box = h('div');
+  const blocks = sv.questions.map((q, i) => {
+    let body;
+    if (q.type === 'text') {
+      inputs[q.id] = h('textarea', { maxlength: '2000' });
+      body = inputs[q.id];
+    } else {
+      const type = q.type === 'multi' ? 'checkbox' : 'radio';
+      const name = 'q_' + q.id;
+      inputs[q.id] = q.options.map(o => h('input', { type: type, name: name, value: o }));
+      body = q.options.map((o, j) => h('label', { class: 'opt' }, inputs[q.id][j], h('span', {}, o)));
+    }
+    return h('div', { class: 'card' },
+      h('div', { style: 'font-weight:600' }, (i + 1) + '. ' + q.text, q.required ? h('span', { class: 'req' }, '必須') : null),
+      q.type === 'multi' ? h('div', { class: 'sub' }, '複数選べます') : null,
+      body);
+  });
+  const btn = h('button', { class: 'block' }, '送信する');
+  btn.addEventListener('click', () => {
+    setMsg(box, null);
+    const ans = {};
+    for (const q of sv.questions) {
+      if (q.type === 'text') ans[q.id] = inputs[q.id].value;
+      else if (q.type === 'single') { const c = inputs[q.id].find(x => x.checked); ans[q.id] = c ? c.value : ''; }
+      else ans[q.id] = inputs[q.id].filter(x => x.checked).map(x => x.value);
+      const v = ans[q.id];
+      if (q.required && (Array.isArray(v) ? !v.length : !String(v).trim())) return setMsg(box, errBox('「' + q.text + '」は必須です。'));
+    }
+    withBusy(btn, call('submitAnswers', S.st.staffId, S.st.pin, sv.surveyId, ans).then(() => {
+      S.st.surveys = S.st.surveys.filter(x => x.surveyId !== sv.surveyId);
+      S.st.answered.push(sv.surveyId);
+      staffDone(sv);
+    }).catch(e => setMsg(box, errBox(e.message))));
+  });
+  show(h('div', { class: 'row between' }, h('span', { class: 'tag' + (sv.anonymous ? '' : ' gray') }, sv.anonymous ? '無記名' : '記名'),
+      h('button', { class: 'ghost small', onclick: staffList }, '一覧に戻る')),
+    h('h1', {}, sv.title),
+    sv.description ? h('div', { class: 'sub' }, sv.description) : null,
+    h('div', { class: 'note' }, sv.anonymous
+      ? 'このアンケートは無記名です。回答内容とお名前は紐づけて保存されません(回答済みかどうかだけが記録されます)。'
+      : 'このアンケートは記名式です。回答はお名前と一緒に保存されます。'),
+    blocks, box, btn);
+}
+
+function staffDone(sv) {
+  const more = S.st.surveys.length;
+  show(h('div', { class: 'card center' },
+      h('h1', {}, '送信しました'), h('div', { class: 'sub' }, 'ご協力ありがとうございました。'),
+      more ? h('button', { class: 'block', onclick: staffList }, '他のアンケートに回答する(' + more + '件)') : null,
+      h('button', { class: 'block ghost', style: 'background:#fff;color:#2f7d5b', onclick: staffLogin }, '終了(ログアウト)')),
+    h('div', { class: 'note' }, '共有のスマホやパソコンでは、「終了」を押してから画面を閉じてください。'));
+}
+
+// ====================================================
+//  園長用管理画面
+// ====================================================
+function adminLogin() {
+  S.ad = null;
+  const facSel = h('select', {}, h('option', { value: '' }, '読み込み中…'));
+  const pw = h('input', { type: 'password', autocomplete: 'off', placeholder: '管理パスワード' });
+  const box = h('div');
+  const btn = h('button', { class: 'block' }, 'ログイン');
+  call('getFacilities').then(list => {
+    facSel.replaceChildren(h('option', { value: '' }, '園を選んでください'), ...list.map(f => h('option', { value: f.facilityId }, f.name)));
+    const last = lsGet('lastFacility');
+    if (last && list.some(f => f.facilityId === last)) facSel.value = last;
+  }).catch(e => setMsg(box, errBox(e.message)));
+  btn.addEventListener('click', () => {
+    setMsg(box, null);
+    if (!facSel.value || !pw.value) return setMsg(box, errBox('園とパスワードを入力してください。'));
+    withBusy(btn, call('adminLogin', { fid: facSel.value, pw: pw.value }).then(r => {
+      lsSet('lastFacility', facSel.value);
+      S.ad = { cred: { fid: facSel.value, pw: pw.value }, admin: true, title: r.facilityName, tab: 'surveys', back: adminLogin };
+      adminMain();
+    }).catch(e => setMsg(box, errBox(e.message))));
+  });
+  show(h('h1', {}, '管理画面(園長用)'),
+    h('div', { class: 'card' }, h('label', { class: 'f' }, '園'), facSel, h('label', { class: 'f' }, '管理パスワード'), pw, box, btn));
+}
+
+function adminMain() {
+  const tabs = S.ad.admin ? [['surveys', 'アンケート'], ['staff', '職員'], ['settings', '設定']] : [['surveys', 'アンケート']];
+  const body = h('div');
+  const bar = S.ad.admin ? h('div', { class: 'tabs' }, tabs.map(t => h('button', {
+    class: S.ad.tab === t[0] ? 'on' : '', onclick: () => { S.ad.tab = t[0]; adminMain(); } }, t[1]))) : null;
+  show(h('div', { class: 'row between' }, h('h1', {}, S.ad.title), h('button', { class: 'ghost small', onclick: S.ad.back }, S.ad.admin ? 'ログアウト' : '← 回答画面へ')),
+    bar, body);
+  if (S.ad.tab === 'surveys') adminSurveys(body);
+  else if (S.ad.tab === 'staff') adminStaff(body);
+  else adminSettings(body);
+}
+
+// ---- 職員タブ ----
+function adminStaff(body) {
+  const box = h('div');
+  const listBox = h('div', {}, h('div', { class: 'sub' }, '読み込み中…'));
+  const names = h('textarea', { placeholder: '1行に1人ずつ名前を入力\n例:\n山田 花子\n佐藤 太郎' });
+  const addBtn = h('button', { class: 'block' }, '追加する(初期PINは全員 0000)');
+  const resBox = h('div');
+
+  function load() {
+    call('adminGetStaff', S.ad.cred).then(list => {
+      listBox.replaceChildren(list.length === 0 ? h('div', { class: 'sub' }, 'まだ職員が登録されていません。') :
+        h('table', {}, h('tr', {}, h('th', {}, '名前'), h('th', {}, '状態'), h('th', {}, '')),
+          list.map(s => h('tr', {},
+            h('td', { style: s.active ? '' : 'color:#999' }, s.name),
+            h('td', {}, s.active ? null : h('span', { class: 'tag gray' }, '無効'),
+              s.active && !s.pinChanged ? h('span', { class: 'tag warn' }, '初期PIN') : null,
+              s.locked ? h('span', { class: 'tag warn' }, 'ロック中') : null),
+            h('td', {}, h('div', { class: 'row' },
+              h('button', { class: 'ghost small', onclick: () => {
+                if (!confirm(s.name + ' さんのPINをリセットします。よろしいですか?')) return;
+                call('adminResetPin', S.ad.cred, s.staffId).then(r => {
+                  setMsg(resBox, h('div', { class: 'ok' }, r.name + ' さんのPINを初期PIN ', h('b', {}, r.pin), ' に戻しました(初回ログイン時に本人が変更します)'));
+                  load();
+                }).catch(e => setMsg(box, errBox(e.message)));
+              } }, 'PINリセット'),
+              h('button', { class: 'danger small', onclick: () => {
+                call('adminSetActive', S.ad.cred, s.staffId, !s.active).then(load).catch(e => setMsg(box, errBox(e.message)));
+              } }, s.active ? '無効にする' : '有効に戻す')))))));
+    }).catch(e => setMsg(box, errBox(e.message)));
+  }
+  addBtn.addEventListener('click', () => {
+    setMsg(box, null);
+    const arr = names.value.split('\n').map(x => x.trim()).filter(Boolean);
+    if (!arr.length) return setMsg(box, errBox('名前を入力してください。'));
+    withBusy(addBtn, call('adminAddStaff', S.ad.cred, arr).then(r => {
+      names.value = '';
+      setMsg(resBox, h('div', { class: 'ok' },
+        r.created.length + '人を登録しました。全員の初期PINは「0000」です。初回ログイン時に、各自が自分のPINへ変更します。',
+        r.skipped.length ? h('div', {}, '登録済みのためスキップ: ' + r.skipped.join('、')) : null));
+      load();
+    }).catch(e => setMsg(box, errBox(e.message))));
+  });
+  body.append(h('div', { class: 'card' }, h('h2', {}, '職員を追加'), names, addBtn, box, resBox),
+    h('div', { class: 'card' }, h('h2', {}, '職員一覧'), listBox,
+      h('div', { class: 'sub', style: 'margin-top:8px' }, '職員は、回答画面の「+ 新規作成」から自分でアンケートを作成できます。作成した職員がそのアンケートの管理者になり、園長は園内のすべてのアンケートを確認できます。'),
+      h('div', { class: 'sub', style: 'margin-top:4px' }, '退職・異動した方は「無効にする」を選ぶと、名前が回答画面に出なくなります(過去の回答は残ります)。')));
+  load();
+}
+
+// ---- 設定タブ ----
+function adminSettings(body) {
+  const cur = h('input', { type: 'password', autocomplete: 'off' });
+  const n1 = h('input', { type: 'password', autocomplete: 'off', placeholder: '6文字以上' });
+  const n2 = h('input', { type: 'password', autocomplete: 'off' });
+  const box = h('div');
+  const btn = h('button', { class: 'block' }, 'パスワードを変更');
+  btn.addEventListener('click', () => {
+    setMsg(box, null);
+    if (n1.value !== n2.value) return setMsg(box, errBox('新しいパスワードが一致しません。'));
+    withBusy(btn, call('adminChangePassword', { fid: S.ad.cred.fid, pw: cur.value }, n1.value).then(() => {
+      S.ad.cred.pw = n1.value; cur.value = n1.value = n2.value = '';
+      setMsg(box, h('div', { class: 'ok' }, '変更しました。'));
+    }).catch(e => setMsg(box, errBox(e.message))));
+  });
+  body.append(h('div', { class: 'card' }, h('h2', {}, '管理パスワードの変更'),
+    h('label', { class: 'f' }, '現在のパスワード'), cur, h('label', { class: 'f' }, '新しいパスワード'), n1,
+    h('label', { class: 'f' }, '新しいパスワード(確認)'), n2, box, btn));
+}
+
+// ---- アンケートタブ ----
+function adminSurveys(body) {
+  const box = h('div');
+  const listBox = h('div', {}, h('div', { class: 'sub' }, '読み込み中…'));
+  body.append(h('div', { class: 'row between' }, h('h2', { style: 'margin:0' }, 'アンケート一覧'),
+    h('button', { onclick: () => { S.ad.createFrom = ''; adminCreate(); } }, '+ 新規作成')), box, listBox);
+  call('adminGetSurveys', S.ad.cred).then(list => {
+    if (!list.length) return listBox.replaceChildren(h('div', { class: 'card sub' }, 'まだアンケートがありません。「新規作成」から作りましょう。'));
+    listBox.replaceChildren(...list.map(v => h('div', { class: 'card' },
+      h('div', {}, h('span', { class: 'tag' + (v.anonymous ? '' : ' gray') }, v.anonymous ? '無記名' : '記名'),
+        h('span', { class: 'tag ' + (v.open ? '' : 'warn') }, v.open ? '受付中' : '受付終了')),
+      h('h2', { style: 'margin-top:6px' }, v.title),
+      h('div', { class: 'sub' }, '管理者: ' + v.managerName + ' / 対象: ' + (v.targetAll ? '全員' : '選択した職員') + ' / 期限: ' + fmtDate(v.deadline)),
+      h('div', { class: 'prog' }, h('div', { class: 'bar' }, h('i', { style: 'width:' + (v.target ? Math.round(v.completedActive * 100 / v.target) : 0) + '%' })), h('span', {}, v.completedActive + '/' + v.target + '人')),
+      v.people.length ? statusGroups(v.people) : null,
+      h('div', { class: 'row', style: 'margin-top:10px' },
+        h('button', { class: 'small', onclick: () => adminResults(v.surveyId) }, '結果'),
+        h('button', { class: 'ghost small', onclick: () => adminShareText(v) }, 'Chatwork用の依頼文'),
+        h('button', { class: 'ghost small', onclick: () => {
+          call('adminSetSurveyStatus', S.ad.cred, v.surveyId, v.status === 'open' ? 'closed' : 'open').then(adminMain).catch(e => setMsg(box, errBox(e.message)));
+        } }, v.status === 'open' ? '受付を締め切る' : '受付を再開'),
+        h('button', { class: 'danger small', onclick: () => {
+          if (!confirm('「' + v.title + '」と、その回答をすべて削除します。元に戻せません。よろしいですか?')) return;
+          call('adminDeleteSurvey', S.ad.cred, v.surveyId).then(adminMain).catch(e => setMsg(box, errBox(e.message)));
+        } }, '削除')))));
+  }).catch(e => setMsg(box, errBox(e.message)));
+}
+
+function surveyUrl(id) { return BOOT.baseUrl + '?s=' + id; }
+
+function adminShareText(v) {
+  const text = '【アンケートのお願い】\n' + v.title + '\n'
+    + (v.deadline ? '回答期限: ' + fmtDate(v.deadline) + '\n' : '')
+    + (v.anonymous ? '※無記名(回答内容とお名前は紐づきません)\n' : '')
+    + '\n▼回答はこちら\n' + surveyUrl(v.surveyId) + '\n\n'
+    + '園と名前を選び、PIN(4桁)を入力してください。\n※共有のスマホ・パソコンでは、回答後に「終了」を押してください。';
+  show(h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る'), h('h1', {}, 'Chatwork用の依頼文'),
+    h('div', { class: 'card' }, copyBox(text, 'コピー'), h('div', { class: 'sub', style: 'margin-top:8px' }, 'Chatworkのグループチャットに貼り付けて送信してください。')));
+}
+
+function adminCreate() {
+  const title = h('input', { type: 'text', maxlength: '100', placeholder: '例: 9月の行事アンケート' });
+  const desc = h('textarea', { placeholder: '説明(任意)', style: 'min-height:70px' });
+  const deadline = h('input', { type: 'date' });
+  const anon = h('input', { type: 'radio', name: 'anon', value: '1' });
+  const named = h('input', { type: 'radio', name: 'anon', value: '0', checked: true });
+  const qList = [];
+  const qBox = h('div');
+  const box = h('div');
+  const addBtn = h('button', { class: 'ghost', onclick: () => addQ() }, '+ 設問を追加');
+
+  // ---- 対象者の選択 ----
+  const mgrSel = h('select', {}, h('option', { value: '' }, '園長のみ(指定しない)'));
+  let picks = [];   // [{ s, cb }]
+  const counter = h('span', { class: 'sub' });
+  const tgtList = h('div', {}, h('div', { class: 'sub' }, '読み込み中…'));
+  function updateCount() { counter.textContent = picks.filter(p => p.cb.checked).length + ' / ' + picks.length + '人を選択中'; }
+  function setAll(v) { picks.forEach(p => { p.cb.checked = v; }); updateCount(); }
+  call('adminGetStaff', S.ad.cred).then(list => {
+    mgrSel.replaceChildren(h('option', { value: '' }, '園長のみ(指定しない)'), ...list.filter(s => s.active).map(s => h('option', { value: s.staffId }, s.name)));
+    picks = list.filter(s => s.active).map(s => ({ s: s, cb: h('input', { type: 'checkbox', checked: true, onchange: updateCount }) }));
+    if (!picks.length) return tgtList.replaceChildren(h('div', { class: 'err' }, '職員が登録されていません。先に「職員」タブで登録してください。'));
+    tgtList.replaceChildren(...picks.map(p => h('label', { class: 'opt' }, p.cb, h('span', {}, p.s.name))));
+    updateCount();
+  }).catch(e => tgtList.replaceChildren(errBox(e.message)));
+  const saveBtn = h('button', { class: 'block' }, '作成する');
+
+  function addQ() {
+    const text = h('input', { type: 'text', placeholder: '設問文' });
+    const type = h('select', {}, h('option', { value: 'single' }, '選択式(1つ選ぶ)'), h('option', { value: 'multi' }, '選択式(複数選べる)'), h('option', { value: 'text' }, '自由記述'));
+    const opts = h('textarea', { placeholder: '選択肢を1行に1つずつ\n例:\nはい\nいいえ', style: 'min-height:80px' });
+    const req = h('input', { type: 'checkbox', checked: true });
+    const optWrap = h('div', {}, opts);
+    const q = { text, type, opts, req };
+    const wrap = h('div', { class: 'qbox' },
+      h('div', { class: 'row between' }, h('b', { class: 'qn' }), h('button', { class: 'danger small', onclick: () => { qList.splice(qList.indexOf(q), 1); wrap.remove(); renum(); } }, '削除')),
+      text, h('div', { style: 'margin-top:8px' }, type), h('div', { style: 'margin-top:8px' }, optWrap),
+      h('label', { style: 'display:block;margin-top:8px;font-size:14px' }, req, ' 必須にする'));
+    type.addEventListener('change', () => { optWrap.style.display = type.value === 'text' ? 'none' : ''; });
+    q.wrap = wrap; qList.push(q); qBox.append(wrap); renum();
+  }
+  function renum() { qList.forEach((q, i) => { q.wrap.querySelector('.qn').textContent = '設問 ' + (i + 1); }); }
+  addQ();
+
+  saveBtn.addEventListener('click', () => {
+    setMsg(box, null);
+    const sv = {
+      title: title.value, description: desc.value, deadline: deadline.value, anonymous: anon.checked,
+      managerId: S.ad.admin ? mgrSel.value : '',
+      targets: (picks.length && picks.every(p => p.cb.checked)) ? 'all' : picks.filter(p => p.cb.checked).map(p => p.s.staffId),
+      questions: qList.map(q => ({ text: q.text.value, type: q.type.value, options: q.opts.value.split('\n'), required: q.req.checked })),
+    };
+    withBusy(saveBtn, call('adminCreateSurvey', S.ad.cred, sv).then(r => {
+      call('adminGetSurveys', S.ad.cred).then(list => {
+        const v = list.find(x => x.surveyId === r.surveyId);
+        if (v) adminShareText(v); else adminMain();
+      });
+    }).catch(e => setMsg(box, errBox(e.message))));
+  });
+
+  show(h('button', { class: 'ghost small', onclick: S.ad.createFrom === 'staff' ? staffLoadList : adminMain }, '← 戻る'), h('h1', {}, 'アンケートを作成'),
+    h('div', { class: 'card' },
+      h('label', { class: 'f' }, 'タイトル'), title, h('label', { class: 'f' }, '説明(任意)'), desc,
+      h('label', { class: 'f' }, '回答期限(任意・この日の終わりまで回答できます)'), deadline,
+      h('label', { class: 'f' }, '回答方式'),
+      h('label', { class: 'opt' }, named, h('span', {}, h('b', {}, '記名'), h('div', { class: 'sub' }, '誰が回答したか分かります。未回答者の確認もできます。'))),
+      h('label', { class: 'opt' }, anon, h('span', {}, h('b', {}, '無記名'), h('div', { class: 'sub' }, '回答内容は名前と紐づけません。未回答者(回答済みかどうか)だけ確認できます。'))),
+      h('div', { class: 'note' }, '無記名の結果は、回答が' + '3件以上' + 'たまってから表示されます(少人数で個人が特定されるのを防ぐため)。')),
+    h('div', { class: 'card' },
+      h('h2', {}, '対象者'),
+      h('div', { class: 'sub' }, '回答をお願いする職員を選びます。選ばれた職員にだけ、このアンケートが表示されます。'),
+      h('div', { class: 'row', style: 'margin:10px 0' },
+        h('button', { class: 'small', onclick: () => setAll(true) }, '全員を選択'),
+        h('button', { class: 'ghost small', onclick: () => setAll(false) }, '全員を外す'), counter),
+      tgtList),
+    h('div', { class: 'card' },
+      h('h2', {}, '管理者'),
+      S.ad.admin
+        ? [h('div', { class: 'sub' }, 'このアンケートの進捗・結果を確認し、締め切りなどの管理ができる職員を選べます(例: 行事担当)。園長は常に管理できます。'), h('div', { style: 'margin-top:8px' }, mgrSel)]
+        : h('div', { class: 'sub' }, 'このアンケートの管理者は、あなたになります。')),
+    h('h3', {}, '設問'), qBox, addBtn, box, saveBtn);
+}
+
+function adminResults(surveyId) {
+  const box = h('div');
+  show(h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る'), box, h('div', { class: 'sub' }, '読み込み中…'));
+  call('adminGetResults', S.ad.cred, surveyId).then(r => {
+    const sv = r.survey;
+    const nodes = [
+      h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る'),
+      h('div', { style: 'margin-top:8px' }, h('span', { class: 'tag' + (sv.anonymous ? '' : ' gray') }, sv.anonymous ? '無記名' : '記名'),
+        h('span', { class: 'tag ' + (sv.open ? '' : 'warn') }, sv.open ? '受付中' : '受付終了')),
+      h('h1', {}, sv.title),
+      h('div', { class: 'sub' }, '回答 ' + r.count + '件 / 期限: ' + fmtDate(sv.deadline)),
+    ];
+    if (!r.hidden) {
+      const csv = resultsCsv(r);
+      const fname = (sv.title.replace(/[\\/:*?"<>|.\s]+/g, '_').slice(0, 40) || 'アンケート') + '_結果.csv';
+      const dlMsg = h('span', { class: 'sub' });
+      nodes.push(h('div', { class: 'card' },
+        h('div', { class: 'row' }, h('button', { class: 'small', onclick: () => {
+          try { downloadCsv(fname, csv); dlMsg.textContent = 'ダウンロードしました(' + fname + ')'; }
+          catch (e) { dlMsg.textContent = 'ダウンロードできませんでした。下の「コピー」を使ってください。'; }
+        } }, 'CSVをダウンロード'), dlMsg),
+        h('details', { style: 'margin-top:8px' }, h('summary', { class: 'sub' }, 'ダウンロードできない場合はこちら(コピーして貼り付け)'), copyBox(csv, 'CSVをコピー'))));
+    }
+    if (r.hidden) {
+      nodes.push(h('div', { class: 'note' }, '無記名アンケートのため、回答が' + r.minAnon + '件以上になるまで結果は表示されません(現在 ' + r.count + '件)。'));
+    } else {
+      sv.questions.forEach((q, i) => {
+        const s = r.summary.find(x => x.id === q.id);
+        const card = h('div', { class: 'card' }, h('div', { style: 'font-weight:600' }, (i + 1) + '. ' + q.text));
+        if (q.type === 'text') {
+          if (!s.texts.length) card.append(h('div', { class: 'sub' }, '回答なし'));
+          s.texts.forEach(t => card.append(h('div', { class: 'txt' }, t)));
+        } else {
+          const total = Math.max(r.count, 1);
+          q.options.forEach(o => {
+            const c = s.counts[o] || 0;
+            const pct = Math.round(c * 100 / total);
+            card.append(h('div', { class: 'bl' }, h('span', {}, o), h('span', {}, c + '人 (' + pct + '%)')),
+              h('div', { class: 'bar' }, h('i', { style: 'width:' + pct + '%' })));
+          });
+        }
+        nodes.push(card);
+      });
+      if (r.people) {
+        nodes.push(h('div', { class: 'card' }, h('h2', {}, '個人別の回答'),
+          r.people.length === 0 ? h('div', { class: 'sub' }, 'まだ回答がありません。') :
+          h('div', { style: 'overflow-x:auto' }, h('table', {},
+            h('tr', {}, h('th', {}, '名前'), sv.questions.map((q, i) => h('th', {}, (i + 1) + '. ' + q.text))),
+            r.people.map(p => h('tr', {}, h('td', {}, p.name),
+              sv.questions.map(q => { const v = p.answers[q.id]; return h('td', {}, Array.isArray(v) ? v.join('、') : v); })))))));
+      }
+    }
+    const nc = r.notCompleted;
+    const reminder = '【アンケート回答のお願い】\n' + sv.title + '\n'
+      + (sv.deadline ? '回答期限: ' + fmtDate(sv.deadline) + '\n' : '')
+      + '\nまだ回答が届いていない方がいます。お手数ですが、ご回答をお願いします。\n'
+      + '\n未回答: ' + (nc.length ? nc.join('、') : 'なし') + '\n\n▼回答はこちら\n' + surveyUrl(sv.surveyId);
+    const people = r.notCompleted.map(n => ({ name: n, done: false })).concat(r.completed.map(n => ({ name: n, done: true })));
+    nodes.push(h('div', { class: 'card' }, h('h2', {}, '回答状況'), statusGroups(people),
+      sv.anonymous ? h('div', { class: 'sub', style: 'margin-top:8px' }, '無記名でも、回答済みかどうかは記録されるため確認できます(回答内容とは紐づきません)。') : null,
+      nc.length ? h('div', { style: 'margin-top:12px' }, h('b', {}, 'Chatwork用の催促文'), copyBox(reminder, 'コピー')) : null));
+    show(...nodes);
+  }).catch(e => show(h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る'), errBox(e.message)));
+}
+
+// ---------- 起動 ----------
+if (BOOT.mode === 'admin') adminLogin(); else staffLogin();
+</script>
+</body>
+</html>
