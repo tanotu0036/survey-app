@@ -159,7 +159,7 @@ function statusGroups(people) {
     h('div', { class: 'grp' }, '回答済み(' + done.length + '人)'),
     done.length ? h('div', { class: 'chips' }, done.map(p => h('span', { class: 'chip done' }, p.name))) : h('div', { class: 'sub' }, 'まだいません'));
 }
-// 4園共通アンケートの園別回答状況(人数のバー)
+// 全園共通アンケートの園別回答状況(人数のバー)
 function facilityProgress(list) {
   return h('div', { class: 'fprog' }, (list || []).map(f => [
     h('span', {}, f.name.replace('こども保育園', '')),
@@ -254,7 +254,8 @@ function staffLogin() {
       h('label', { class: 'f' }, '名前'), nameSel,
       h('label', { class: 'f' }, 'PIN(4桁)'), pin,
       box, btn),
-    h('div', { class: 'note' }, 'この端末にはログイン情報を残しません。共有のスマホでも安心して使えます。PINを忘れたときは園長に伝えてください。'));
+    h('div', { class: 'note' }, 'この端末にはログイン情報を残しません。共有のスマホでも安心して使えます。PINを忘れたときは園長に伝えてください。'),
+    h('div', { class: 'center', style: 'margin-top:28px' }, h('button', { class: 'ghost small', onclick: adminLogin }, '園長・統括の方はこちら')));
 }
 
 function staffChangePin() {
@@ -301,7 +302,7 @@ function staffList() {
     list.length === 0
       ? h('div', { class: 'card center' }, h('h2', {}, '回答待ちのアンケートはありません'), h('div', { class: 'sub' }, '画面を閉じて大丈夫です。'))
       : list.map(v => h('div', { class: 'card' },
-          h('div', {}, v.allOrg ? h('span', { class: 'tag lav' }, '4園共通') : null,
+          h('div', {}, v.allOrg ? h('span', { class: 'tag lav' }, '全園共通') : null,
             h('span', { class: 'tag' + (v.anonymous ? '' : ' gray') }, v.anonymous ? '無記名' : '記名'),
             v.deadline ? h('span', { class: 'sub' }, '期限 ' + fmtDate(v.deadline)) : null),
           h('h2', { style: 'margin-top:6px' }, v.title),
@@ -396,7 +397,7 @@ function adminLogin() {
   const btn = h('button', { class: 'block' }, 'ログイン');
   call('getFacilities').then(list => {
     facSel.replaceChildren(h('option', { value: '' }, '園を選んでください'), ...list.map(f => h('option', { value: f.facilityId }, f.name)),
-      h('option', { value: 'HQ' }, '統括(4園共通アンケート用)'));
+      h('option', { value: 'HQ' }, '統括'));
     const last = lsGet('lastAdmin') || lsGet('lastFacility');
     if (last && (last === 'HQ' || list.some(f => f.facilityId === last))) facSel.value = last;
   }).catch(e => setMsg(box, errBox(e.message)));
@@ -406,11 +407,12 @@ function adminLogin() {
     withBusy(btn, call('adminLogin', { fid: facSel.value, pw: pw.value }).then(r => {
       lsSet('lastAdmin', facSel.value);
       if (facSel.value !== 'HQ') lsSet('lastFacility', facSel.value);
-      S.ad = { cred: { fid: facSel.value, pw: pw.value }, admin: true, hq: !!r.hq, title: r.hq ? '統括(4園共通アンケート)' : r.facilityName, tab: 'surveys', back: adminLogin };
+      S.ad = { cred: { fid: facSel.value, pw: pw.value }, admin: true, hq: !!r.hq, title: r.hq ? '統括 ' + r.name + ' さん' : r.facilityName, tab: 'surveys', back: adminLogin };
       adminMain();
     }).catch(e => setMsg(box, errBox(e.message))));
   });
-  show(h('h1', {}, '管理画面(園長用)'),
+  show(h('button', { class: 'ghost small', onclick: staffLogin }, '← 職員の方はこちら'),
+    h('h1', {}, '管理画面(園長・統括用)'),
     h('div', { class: 'card' }, h('label', { class: 'f' }, '園'), facSel, h('label', { class: 'f' }, '管理パスワード'), pw, box, btn));
 }
 
@@ -500,17 +502,21 @@ function adminSettings(body) {
 function adminSurveys(body) {
   const box = h('div');
   const listBox = h('div', {}, h('div', { class: 'sub' }, '読み込み中…'));
-  body.append(h('div', { class: 'row between' }, h('h2', { style: 'margin:0' }, 'アンケート一覧'),
-    h('button', { onclick: () => { S.ad.createFrom = ''; adminCreate(); } }, '+ 新規作成')), box, listBox);
+  body.append(...[h('div', { class: 'row between' }, h('h2', { style: 'margin:0' }, 'アンケート一覧'),
+    h('div', { class: 'row' },
+      S.ad.hq ? null : h('button', { onclick: () => { S.ad.createFrom = ''; S.ad.createScope = ''; adminCreate(); } }, S.ad.admin ? '+ この園のアンケート' : '+ 新規作成'),
+      S.ad.admin ? h('button', { style: 'background:var(--lav);border-color:#c9bff0;color:var(--lav-ink)', onclick: () => { S.ad.createFrom = ''; S.ad.createScope = 'ALL'; adminCreate(); } }, '+ 全園共通アンケート') : null)),
+    S.ad.admin && !S.ad.hq ? h('div', { class: 'sub', style: 'margin:6px 0 0' }, '「この園のアンケート」は他の園からは見えません。「全園共通アンケート」は全園の職員が対象で、結果は各園長と統括が見られます。') : null,
+    box, listBox].filter(Boolean));
   call('adminGetSurveys', S.ad.cred).then(list => {
-    if (!list.length) return listBox.replaceChildren(h('div', { class: 'card sub' }, 'まだアンケートがありません。「新規作成」から作りましょう。'));
+    if (!list.length) return listBox.replaceChildren(h('div', { class: 'card sub' }, 'まだアンケートがありません。上のボタンから作りましょう。'));
     listBox.replaceChildren(...list.map(v => h('div', { class: 'card' },
-      h('div', {}, v.all ? h('span', { class: 'tag lav' }, '4園共通') : null,
+      h('div', {}, v.all ? h('span', { class: 'tag lav' }, '全園共通') : null,
         h('span', { class: 'tag' + (v.anonymous ? '' : ' gray') }, v.anonymous ? '無記名' : '記名'),
         h('span', { class: 'tag ' + (v.open ? '' : 'warn') }, v.open ? '受付中' : '受付終了')),
       h('h2', { style: 'margin-top:6px' }, v.title),
       h('div', { class: 'sub' }, v.all
-        ? '作成: ' + v.managerName + ' / 対象: 4園の全職員 / 期限: ' + fmtDate(v.deadline)
+        ? '作成: ' + v.managerName + ' / 対象: 全園の全職員 / 期限: ' + fmtDate(v.deadline)
         : '管理者: ' + v.managerName + ' / 対象: ' + (v.targetAll ? '全員' : '選択した職員') + ' / 期限: ' + fmtDate(v.deadline)),
       h('div', { class: 'prog' }, h('div', { class: 'bar' }, h('i', { style: 'width:' + (v.target ? Math.round(v.completedActive * 100 / v.target) : 0) + '%' })), h('span', {}, v.completedActive + '/' + v.target + '人')),
       v.all ? facilityProgress(v.byFacility) : (v.people && v.people.length ? statusGroups(v.people) : null),
@@ -557,11 +563,9 @@ function adminCreate() {
   const tgtList = h('div', {}, h('div', { class: 'sub' }, '読み込み中…'));
   function updateCount() { counter.textContent = picks.filter(p => p.cb.checked).length + ' / ' + picks.length + '人を選択中'; }
   function setAll(v) { picks.forEach(p => { p.cb.checked = v; }); updateCount(); }
-  // ---- 範囲(園長: この園だけ / 4園共通、統括: 4園共通のみ) ----
-  const scopeGarden = h('input', { type: 'radio', name: 'scope', value: '', checked: !S.ad.hq });
-  const scopeAll = h('input', { type: 'radio', name: 'scope', value: 'ALL', checked: !!S.ad.hq });
-  const isAll = () => !!S.ad.hq || scopeAll.checked;
-  if (!S.ad.hq) call('adminGetStaff', S.ad.cred).then(list => {
+  // ---- 範囲(一覧のボタンで決まる。統括は常に全園共通、職員は園内のみ) ----
+  const isAll = () => !!S.ad.hq || (S.ad.admin && S.ad.createScope === 'ALL');
+  if (!isAll()) call('adminGetStaff', S.ad.cred).then(list => {
     mgrSel.replaceChildren(h('option', { value: '' }, '園長のみ(指定しない)'), ...list.filter(s => s.active).map(s => h('option', { value: s.staffId }, s.name)));
     picks = list.filter(s => s.active).map(s => ({ s: s, cb: h('input', { type: 'checkbox', checked: true, onchange: updateCount }) }));
     if (!picks.length) return tgtList.replaceChildren(h('div', { class: 'err' }, '職員が登録されていません。先に「職員」タブで登録してください。'));
@@ -627,32 +631,26 @@ function adminCreate() {
         : h('div', { class: 'sub' }, 'このアンケートの管理者は、あなたになります。'));
   const allCard = h('div', { class: 'card' },
       h('h2', {}, '対象者と公開範囲'),
-      h('div', { class: 'sub' }, '4園すべての職員が対象になります。結果は各園の園長と統括が見られ、園別に比べることもできます。'),
+      h('div', { class: 'sub' }, '全園すべての職員が対象になります。結果は各園の園長と統括が見られ、園別に比べることもできます。'),
       h('div', { class: 'sub', style: 'margin-top:4px' }, '締め切り・削除は、作成した人と統括が行えます。'));
-  const scopeCard = (S.ad.admin && !S.ad.hq) ? h('div', { class: 'card' },
-      h('h2', {}, '範囲'),
-      h('label', { class: 'opt' }, scopeGarden, h('span', {}, h('b', {}, 'この園だけ'), h('div', { class: 'sub' }, 'いつものアンケート。他の園からは見えません。'))),
-      h('label', { class: 'opt' }, scopeAll, h('span', {}, h('b', {}, '4園共通'), h('div', { class: 'sub' }, '4園の全職員が対象。結果は各園長と統括が見られます。')))) : null;
   function applyScope() {
     const a = isAll();
     targetCard.style.display = a ? 'none' : '';
     mgrCard.style.display = a ? 'none' : '';
     allCard.style.display = a ? '' : 'none';
   }
-  scopeGarden.addEventListener('change', applyScope);
-  scopeAll.addEventListener('change', applyScope);
   applyScope();
 
   show(h('button', { class: 'ghost small', onclick: S.ad.createFrom === 'staff' ? staffLoadList : adminMain }, '← 戻る'),
-    h('h1', {}, S.ad.hq ? '4園共通アンケートを作成' : 'アンケートを作成'),
-    scopeCard,
+    h('h1', {}, isAll() ? '全園共通アンケートを作成' : 'アンケートを作成'),
+    isAll() ? h('div', { class: 'tag lav' }, '全園共通') : (S.ad.admin ? h('div', { class: 'sub' }, S.ad.title + 'だけのアンケートです(他の園からは見えません)。') : null),
     h('div', { class: 'card' },
       h('label', { class: 'f' }, 'タイトル'), title, h('label', { class: 'f' }, '説明(任意)'), desc,
       h('label', { class: 'f' }, '回答期限(任意・この日の終わりまで回答できます)'), deadline,
       h('label', { class: 'f' }, '回答方式'),
       h('label', { class: 'opt' }, named, h('span', {}, h('b', {}, '記名'), h('div', { class: 'sub' }, '誰が回答したか分かります。未回答者の確認もできます。'))),
       h('label', { class: 'opt' }, anon, h('span', {}, h('b', {}, '無記名'), h('div', { class: 'sub' }, '回答内容は名前と紐づけません。未回答者(回答済みかどうか)だけ確認できます。'))),
-      h('div', { class: 'note' }, '無記名の結果は、回答が' + '3件以上' + 'たまってから表示されます(少人数で個人が特定されるのを防ぐため)。4園共通の園別集計も、園ごとに3件以上で表示されます。')),
+      h('div', { class: 'note' }, '無記名の結果は、回答が' + '3件以上' + 'たまってから表示されます(少人数で個人が特定されるのを防ぐため)。全園共通の園別集計も、園ごとに3件以上で表示されます。')),
     targetCard, mgrCard, allCard,
     h('h3', {}, '設問'), qBox, addBtn, box, saveBtn);
 }
@@ -663,13 +661,13 @@ function adminResults(surveyId) {
     const sv = r.survey;
     const head = [
       h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る'),
-      h('div', { style: 'margin-top:8px' }, sv.all ? h('span', { class: 'tag lav' }, '4園共通') : null,
+      h('div', { style: 'margin-top:8px' }, sv.all ? h('span', { class: 'tag lav' }, '全園共通') : null,
         h('span', { class: 'tag' + (sv.anonymous ? '' : ' gray') }, sv.anonymous ? '無記名' : '記名'),
         h('span', { class: 'tag ' + (sv.open ? '' : 'warn') }, sv.open ? '受付中' : '受付終了')),
       h('h1', {}, sv.title),
       h('div', { class: 'sub' }, '回答 ' + r.count + '件 / 期限: ' + fmtDate(sv.deadline)),
     ];
-    // CSV(全体分。4園共通では「園」の列が付く)
+    // CSV(全体分。全園共通では「園」の列が付く)
     if (!r.hidden) {
       const csv = resultsCsv(r);
       const fname = (sv.title.replace(/[\\/:*?"<>|.\s]+/g, '_').slice(0, 40) || 'アンケート') + '_結果.csv';
@@ -683,10 +681,10 @@ function adminResults(surveyId) {
     }
 
     const view = h('div');
-    // 4園共通: 「4園全体」と各園を切り替えて表示
+    // 全園共通: 「全園」と各園を切り替えて表示
     let tabBar = null;
     if (sv.all && r.groups) {
-      const keys = [['', '4園全体']].concat(r.groups.map(g => [g.facilityId, g.name.replace('こども保育園', '')]));
+      const keys = [['', '全園']].concat(r.groups.map(g => [g.facilityId, g.name.replace('こども保育園', '')]));
       const btns = keys.map(k => h('button', { onclick: () => select(k[0]) }, k[1]));
       tabBar = h('div', { class: 'tabs' }, btns);
       function select(key) {
@@ -747,7 +745,7 @@ function adminResults(surveyId) {
       return card;
     }
 
-    // 回答状況と催促文。4園全体では園ごとに分けて表示する
+    // 回答状況と催促文。全園では園ごとに分けて表示する
     function statusCard(g) {
       const groups = g ? [g] : (sv.all && r.groups ? r.groups : [{ name: '', completed: r.completed, notCompleted: r.notCompleted }]);
       const blocks = groups.map(x => {
