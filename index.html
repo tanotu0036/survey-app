@@ -62,6 +62,7 @@
   .bl { display:flex; justify-content:space-between; font-size:14px; margin-top:8px; gap:8px; }
   .qbox { border:1.5px dashed #d9d0ec; border-radius:14px; padding:12px; margin:10px 0; background:#fdfcff; }
   .txt { background:#fbf9fe; border:1px solid var(--line); border-radius:12px; padding:8px 12px; margin:6px 0; white-space:pre-wrap; font-size:14px; }
+  .txt .who { font-size:12px; font-weight:600; color:#2f5878; white-space:normal; margin-bottom:2px; }
   .center { text-align:center; }
   .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
   .chip { padding:3px 13px; border-radius:99px; font-size:14px; border:1px solid var(--peach-line); background:var(--peach); color:var(--peach-ink); }
@@ -1166,9 +1167,10 @@ function adminResults(surveyId) {
       if (hidden) {
         nodes.push(h('div', { class: 'note' }, '無記名アンケートのため、' + (g ? 'この園の' : '') + '回答が' + r.minAnon + '件以上になるまで結果は表示されません(現在 ' + count + '件)。'));
       } else {
-        qs.forEach((q, i) => nodes.push(questionCard(q, i, summary.find(x => x.id === q.id), count)));
-        if (r.people) {
-          const people = g ? r.people.filter(p => p.facility === g.name) : r.people;
+        // 記名のときだけ people がある(無記名は名前が送られてこない)
+        const people = r.people ? (g ? r.people.filter(p => p.facility === g.name) : r.people) : null;
+        qs.forEach((q, i) => nodes.push(questionCard(q, i, summary.find(x => x.id === q.id), count, people, !g)));
+        if (people) {
           nodes.push(h('div', { class: 'card' }, h('h2', {}, '個人別の回答'),
             people.length === 0 ? h('div', { class: 'sub' }, 'まだ回答がありません。') :
             h('div', { style: 'overflow-x:auto' }, h('table', {},
@@ -1181,7 +1183,8 @@ function adminResults(surveyId) {
       view.replaceChildren(...nodes.filter(Boolean));
     }
 
-    function questionCard(q, i, s, count) {
+    // people: 記名のときの回答者一覧(無記名は null) / showFac: 全園表示で園名を添えるか
+    function questionCard(q, i, s, count, people, showFac) {
       const card = h('div', { class: 'card' }, h('div', { style: 'font-weight:600' }, (i + 1) + '. ' + q.text, dirTag(q)));
       // 無記名で回答が少ない園長だけの設問は、個人が特定されないように表示しない(GAS側で中身を送らない)
       if (s.few) {
@@ -1189,6 +1192,15 @@ function adminResults(surveyId) {
         return card;
       }
       if (q.type === 'text') {
+        // 記名: 誰のアイデアか分かるように、回答ごとに名前(全園では園名も)を添える
+        if (people) {
+          const rows = people.filter(p => String(p.answers[q.id] || '').trim());
+          if (!rows.length) card.append(h('div', { class: 'sub' }, '回答なし'));
+          rows.forEach(p => card.append(h('div', { class: 'txt' },
+            h('div', { class: 'who' }, p.name, showFac && sv.all && p.facility ? h('span', { class: 'sub' }, '(' + p.facility.replace('こども保育園', '') + ')') : null),
+            p.answers[q.id])));
+          return card;
+        }
         if (!s.texts.length) card.append(h('div', { class: 'sub' }, '回答なし'));
         s.texts.forEach(t => card.append(h('div', { class: 'txt' }, t)));
         return card;
