@@ -70,6 +70,9 @@
   .sortrow { display:flex; align-items:center; gap:8px; padding:8px 4px; border-bottom:1px solid var(--line); }
   .sortno { width:2em; text-align:right; color:var(--sub); font-size:13px; }
   .sortname { flex:1; }
+  .sortrow { cursor:grab; user-select:none; -webkit-user-select:none; background:#fff; }
+  .sortrow.dragging { cursor:grabbing; background:#e3f0fb; border-radius:10px; box-shadow:0 4px 14px rgba(150,130,190,.25); position:relative; z-index:1; }
+  .grip { touch-action:none; color:#a8a5b8; font-size:20px; line-height:1; padding:6px 8px; margin:-6px 0 -6px -4px; cursor:grab; }
   .grp { font-size:13px; font-weight:600; margin-top:12px; color:var(--ink); }
   .prog { display:flex; align-items:center; gap:10px; margin-top:8px; }
   .prog .bar { flex:1; }
@@ -655,7 +658,7 @@ function adminStaff(body) {
     input.focus();
   }
 
-  // ---- 並べ替え(▲▼で動かして、最後に保存) ----
+  // ---- 並べ替え(ドラッグ、または▲▼で動かして、最後に保存) ----
   function renderSort() {
     setMsg(listMsg, null);
     const order = staff.slice();
@@ -668,11 +671,49 @@ function adminStaff(body) {
       draw();
     }
     function draw() {
-      wrap.replaceChildren(...order.map((s, i) => h('div', { class: 'sortrow' },
-        h('span', { class: 'sortno' }, String(i + 1)),
-        h('span', { class: 'sortname', style: s.active ? '' : 'color:#999' }, s.name, s.active ? null : h('span', { class: 'tag gray', style: 'margin-left:6px' }, '無効')),
-        h('button', { class: 'ghost small', disabled: i === 0, onclick: () => move(i, -1), 'aria-label': '上へ' }, '▲'),
-        h('button', { class: 'ghost small', disabled: i === order.length - 1, onclick: () => move(i, 1), 'aria-label': '下へ' }, '▼'))));
+      wrap.replaceChildren(...order.map((s, i) => {
+        const row = h('div', { class: 'sortrow' },
+          h('span', { class: 'grip', 'aria-hidden': 'true' }, '⠿'),
+          h('span', { class: 'sortno' }, String(i + 1)),
+          h('span', { class: 'sortname', style: s.active ? '' : 'color:#999' }, s.name, s.active ? null : h('span', { class: 'tag gray', style: 'margin-left:6px' }, '無効')),
+          h('button', { class: 'ghost small', disabled: i === 0, onclick: () => move(i, -1), 'aria-label': '上へ' }, '▲'),
+          h('button', { class: 'ghost small', disabled: i === order.length - 1, onclick: () => move(i, 1), 'aria-label': '下へ' }, '▼'));
+        row.dataset.id = s.staffId;
+        row.addEventListener('pointerdown', e => startDrag(e, row));
+        return row;
+      }));
+    }
+    // ドラッグ: マウスは行のどこからでも、スマホは左の「⠿」をつかんで動かす(行の他の場所は画面のスクロールに使う)
+    function startDrag(e, row) {
+      if (e.button > 0 || e.target.closest('button')) return;
+      if (e.pointerType !== 'mouse' && !e.target.closest('.grip')) return;
+      e.preventDefault();
+      row.setPointerCapture(e.pointerId);
+      row.classList.add('dragging');
+      const onMove = ev => {
+        // 指(カーソル)より上にある行の数 = 入るべき位置。
+        // つかんでいる行を抜き差しするとドラッグが切れるので、隣の行のほうを入れ替えて近づける
+        const y = ev.clientY;
+        const rows = [...wrap.children];
+        const want = rows.filter(r => r !== row && r.getBoundingClientRect().top + r.offsetHeight / 2 < y).length;
+        let idx = rows.indexOf(row);
+        while (idx > want) { wrap.insertBefore(row.previousSibling, row.nextSibling); idx--; }
+        while (idx < want) { wrap.insertBefore(row.nextSibling, row); idx++; }
+        // 画面の端に近づいたら自動でスクロール
+        if (y < 60) window.scrollBy(0, -12); else if (y > window.innerHeight - 60) window.scrollBy(0, 12);
+      };
+      const onEnd = () => {
+        row.removeEventListener('pointermove', onMove);
+        row.removeEventListener('pointerup', onEnd);
+        row.removeEventListener('pointercancel', onEnd);
+        row.classList.remove('dragging');
+        const ids = [...wrap.children].map(r => r.dataset.id);
+        order.sort((a, b) => ids.indexOf(a.staffId) - ids.indexOf(b.staffId));
+        draw();   // 番号と▲▼を付け直す
+      };
+      row.addEventListener('pointermove', onMove);
+      row.addEventListener('pointerup', onEnd);
+      row.addEventListener('pointercancel', onEnd);
     }
     save.addEventListener('click', () => {
       withBusy(save, call('adminReorderStaff', S.ad.cred, order.map(s => s.staffId)).then(() => {
@@ -682,7 +723,7 @@ function adminStaff(body) {
     });
     draw();
     sortBtn.style.display = 'none';
-    listBox.replaceChildren(h('div', { class: 'sub', style: 'margin-bottom:8px' }, '▲▼で順番を入れ替えて、「この順番で保存」を押してください。'),
+    listBox.replaceChildren(h('div', { class: 'sub', style: 'margin-bottom:8px' }, '名前をドラッグして順番を入れ替え、「この順番で保存」を押してください(スマホは左の ⠿ をつかんで動かします。▲▼でも動かせます)。'),
       wrap, h('div', { class: 'row', style: 'margin-top:10px' }, save, h('button', { class: 'ghost small', onclick: () => { setMsg(listMsg, null); renderList(); } }, 'やめる')));
   }
   sortBtn.addEventListener('click', renderSort);
