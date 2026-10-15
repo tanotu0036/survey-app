@@ -294,7 +294,7 @@ function staffProgress(v) {
     h('div', { class: 'plist' }, pend.length ? pend.map((p, i) => [i ? '、' : '',
       p.me ? h('b', { class: 'pme' }, p.name + '(あなた)') : p.name]) : 'なし'),
     h('div', { class: 'pgrp' }, '回答済み ' + pr.done + '人(回答した順)'),
-    h('div', { class: 'plist done' }, done.length ? done.map((p, i) => (i ? '　' : '') + (i + 1) + '. ' + p.name) : 'まだいません'));
+    h('div', { class: 'plist done' }, done.length ? done.map(p => p.name).join('、') : 'まだいません'));
   S.st.openProg = S.st.openProg || {};   // 開いた状態はアンケートごとに覚えておく(ログアウトまで)
   const tog = h('button', { class: 'ptoggle', type: 'button' });
   function apply() {
