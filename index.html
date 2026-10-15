@@ -81,6 +81,12 @@
   .scale input { transform:scale(1.2); accent-color:#8fc9b6; margin:0; }
   .scale-ends { display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--sub); margin-top:4px; }
   .avg { font-size:22px; font-weight:700; color:var(--main-ink); }
+  /* 設問の補足説明・非表示・下書き・取り込み */
+  .qnote { font-size:13px; color:var(--sub); white-space:pre-wrap; margin:4px 0 8px; padding:8px 12px; background:#fbf9fe; border-left:3px solid var(--lav); border-radius:0 10px 10px 0; }
+  .qbox.off { opacity:.6; background:#f6f5f8; }
+  .draft { font-size:12px; color:var(--sub); text-align:right; min-height:1.4em; margin-top:6px; }
+  .imp ol { margin:6px 0; padding-left:1.8em; font-size:14px; }
+  .imp li { margin:4px 0; }
 </style>
 </head>
 <body>
@@ -100,7 +106,7 @@ const BOOT = (() => {
   };
 })();
 const app = document.getElementById('app');
-const S = {};   // 画面状態(メモリ上のみ。端末には保存しない)
+const S = {};   // 画面状態(メモリ上のみ。ログイン情報は端末に保存しない。入力途中の下書きだけ保存する)
 
 // ---------- 小道具 ----------
 function h(tag, attrs, ...kids) {
@@ -153,6 +159,84 @@ function withBusy(btn, promise) {
 }
 function lsGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+
+// ---------- 入力途中の下書き(端末に自動保存) ----------
+// 回答: 'draft:a:職員ID:アンケートID' / 作成: 'draft:c:作成者:範囲'。送信・作成が済んだら消す。
+const DRAFT_DAYS = 30;
+function draftLoad(k) {
+  try { const d = JSON.parse(lsGet(k) || 'null'); return d && d.v ? d : null; } catch (e) { return null; }
+}
+function draftSave(k, v) { lsSet(k, JSON.stringify({ t: Date.now(), v: v })); }
+// 古い下書き(30日以上前)を掃除する
+function draftPurge() {
+  try {
+    const old = Date.now() - DRAFT_DAYS * 86400000, del = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.slice(0, 6) === 'draft:') { const d = draftLoad(k); if (!d || d.t < old) del.push(k); }
+    }
+    del.forEach(lsDel);
+  } catch (e) {}
+}
+// 入力のたびに少し待ってから保存し、保存した時刻を表示する
+function draftSaver(key, collect, label) {
+  let timer = null;
+  const run = () => {
+    timer = null;
+    draftSave(key, collect());
+    const d = new Date();
+    label.textContent = '下書きをこの端末に保存しました(' + d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0') + ')';
+  };
+  const fn = () => { clearTimeout(timer); timer = setTimeout(run, 600); };
+  fn.cancel = () => { clearTimeout(timer); timer = null; };
+  fn.flush = () => { if (timer) { clearTimeout(timer); run(); } };   // 保存待ちがあれば今すぐ保存
+  return fn;
+}
+function fmtTime(t) { const d = new Date(t); return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'); }
+
+// ---------- 文章から設問を取り込む ----------
+// Word等から貼り付けた文章(Markdown風)を設問に変換する。
+//  「## Q1. ○○」→ 設問文(「Q1.」は外す)/ 見出しから「回答：」までの文章 → その設問の補足説明
+//  最初の設問より前の文章 → アンケートの説明 /「# タイトル」→ タイトル
+const MD_RULE = /^\s*[-－ー―─━_＿*＊=＝]{3,}\s*$/;   // 区切り線(---、***、―――など)
+function mdInline(s) { return String(s).replace(/^\s*#{1,6}\s*/, '').replace(/\*\*|__|`/g, '').trim(); }
+function mdBlock(lines) {
+  return lines.map(l => MD_RULE.test(l) ? '' : mdInline(l.replace(/^\s*>\s?/, '').replace(/^(\s*)[-*+]\s+/, '$1・')))
+    .join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+function parseSurveyText(src) {
+  const lines = String(src || '').replace(/\r\n?/g, '\n').replace(/ /g, ' ').split('\n');
+  // Q番号の見出し。「#」が付いているか、番号の後に「.」「:」「)」などがあるものだけ(本文中の「Q1で…」は拾わない)
+  const QH = /^\s*(#{1,6})?\s*(?:\*\*\s*)?(?:[QＱ]|問)\s*[0-9０-９]+\s*([.．。、,，:：)）]?)\s*(.*)$/i;
+  const qHead = l => { const m = l.match(QH); return m && (m[1] || m[2]) ? m[3] : null; };
+  const useQ = lines.some(l => qHead(l) !== null);
+  const ANS = /^\s*(?:\*\*\s*)?【?\s*回答\s*(?:[:：]|】)/;
+  let title = '', cur = null;
+  const pre = [], qs = [];
+  lines.forEach(l => {
+    // Q番号の見出しがない文章では「##」以下の見出しを設問にする
+    const t = useQ ? qHead(l) : ((l.match(/^\s*#{2,6}\s+(.+)$/) || [])[1] || null);
+    if (t !== null) { cur = { text: mdInline(t), body: [], closed: false }; qs.push(cur); return; }
+    if (!cur) {
+      const m = l.match(/^\s*#\s+(.+)$/);
+      if (m && !title) title = mdInline(m[1]); else pre.push(l);
+      return;
+    }
+    if (cur.closed) return;   // 「回答：」より後(回答欄)は使わない
+    if (ANS.test(l)) { cur.closed = true; return; }
+    cur.body.push(l);
+  });
+  return {
+    title: title,
+    description: mdBlock(pre),
+    questions: qs.map(q => {
+      // 「## Q1.」だけで設問文が次の行にある場合
+      if (!q.text) { const i = q.body.findIndex(x => mdInline(x) && !MD_RULE.test(x)); if (i >= 0) { q.text = mdInline(q.body[i]); q.body.splice(0, i + 1); } }
+      return { text: q.text, note: mdBlock(q.body) };
+    }).filter(q => q.text),
+  };
+}
 function fmtDate(d) { return d ? d.replace(/^(\d{4})-(\d{2})-(\d{2})$/, (m, y, mo, da) => y + '年' + Number(mo) + '月' + Number(da) + '日') : 'なし'; }
 function statusGroups(people) {
   // people: [{ name, done }] → 未回答(色つき) と 回答済み(グレー) を分けて表示
@@ -186,13 +270,16 @@ function facilityProgress(list) {
     h('div', { class: 'bar' }, h('i', { style: 'width:' + (f.target ? Math.round(f.done * 100 / f.target) : 0) + '%' })),
     h('span', { class: 'sub' }, f.done + '/' + f.target + '人')]));
 }
+// 非表示の設問は回答画面・結果・CSVに出さない(データは残っている)
+function visibleQs(sv) { return (sv.questions || []).filter(q => !q.hidden); }
+function audienceTag(v) { return v.audience === 'director' ? h('span', { class: 'tag warn' }, '園長のみ') : null; }
 function csvCell(v) {
   let t = Array.isArray(v) ? v.join('、') : (v === null || v === undefined ? '' : String(v));
   if (/^[=+\-@\t\r]/.test(t)) t = "'" + t;   // Excelで数式として実行されるのを防ぐ
   return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
 }
 function resultsCsv(r) {
-  const qs = r.survey.questions, anon = r.survey.anonymous, all = !!r.survey.all;
+  const qs = visibleQs(r.survey), anon = r.survey.anonymous, all = !!r.survey.all;
   const fcol = all ? ['園'] : [];
   const rows = [[anon ? '回答番号' : '名前'].concat(fcol, anon ? [] : ['回答状況'], qs.map((q, i) => 'Q' + (i + 1) + ' ' + q.text))];
   if (anon) {
@@ -301,6 +388,7 @@ function staffChangePin() {
 }
 
 function staffAfterLogin() {
+  draftPurge();
   if (BOOT.surveyId && !S.st.shownDirect) {
     S.st.shownDirect = true;
     const sv = S.st.surveys.find(v => v.surveyId === BOOT.surveyId);
@@ -322,13 +410,14 @@ function staffList() {
     list.length === 0
       ? h('div', { class: 'card center' }, h('h2', {}, '回答待ちのアンケートはありません'), h('div', { class: 'sub' }, '画面を閉じて大丈夫です。'))
       : list.map(v => h('div', { class: 'card' },
-          h('div', {}, v.allOrg ? h('span', { class: 'tag lav' }, '全園共通') : null,
+          h('div', {}, v.allOrg ? h('span', { class: 'tag lav' }, '全園共通') : null, audienceTag(v),
             h('span', { class: 'tag' + (v.anonymous ? '' : ' gray') }, v.anonymous ? '無記名' : '記名'),
             v.deadline ? h('span', { class: 'sub' }, '期限 ' + fmtDate(v.deadline)) : null),
           h('h2', { style: 'margin-top:6px' }, v.title),
-          v.description ? h('div', { class: 'sub' }, v.description) : null,
+          v.description ? h('div', { class: 'sub', style: 'white-space:pre-wrap' }, v.description) : null,
           staffProgress(v),
-          h('button', { class: 'block', onclick: () => staffSurvey(v) }, '回答する'))),
+          h('button', { class: 'block', onclick: () => staffSurvey(v) },
+            draftLoad('draft:a:' + S.st.staffId + ':' + v.surveyId) ? '回答のつづきを入力する(下書きあり)' : '回答する'))),
     h('div', { class: 'center', style: 'margin-top:20px' }, h('button', { class: 'ghost', onclick: staffLogin }, '終了(ログアウト)')));
 }
 
@@ -350,7 +439,8 @@ function staffSurvey(sv) {
   S.st.notice = '';
   const inputs = {};
   const box = h('div');
-  const blocks = sv.questions.map((q, i) => {
+  const qs = visibleQs(sv);
+  const blocks = qs.map((q, i) => {
     let body;
     if (q.type === 'text') {
       inputs[q.id] = h('textarea', { maxlength: '2000' });
@@ -368,34 +458,70 @@ function staffSurvey(sv) {
     }
     return h('div', { class: 'card' },
       h('div', { style: 'font-weight:600' }, (i + 1) + '. ' + q.text, q.required ? h('span', { class: 'req' }, '必須') : null),
+      q.note ? h('div', { class: 'qnote' }, q.note) : null,
       q.type === 'multi' ? h('div', { class: 'sub' }, '複数選べます') : null,
       body);
   });
-  const btn = h('button', { class: 'block' }, '送信する');
-  btn.addEventListener('click', () => {
-    setMsg(box, null);
+  function readAns() {
     const ans = {};
-    for (const q of sv.questions) {
+    qs.forEach(q => {
       if (q.type === 'text') ans[q.id] = inputs[q.id].value;
       else if (q.type === 'single' || q.type === 'scale') { const c = inputs[q.id].find(x => x.checked); ans[q.id] = c ? c.value : ''; }
       else ans[q.id] = inputs[q.id].filter(x => x.checked).map(x => x.value);
+    });
+    return ans;
+  }
+  function fillAns(ans) {
+    qs.forEach(q => {
+      const v = ans[q.id];
+      if (v === undefined) return;
+      if (q.type === 'text') inputs[q.id].value = String(v);
+      else inputs[q.id].forEach(x => { x.checked = Array.isArray(v) ? v.indexOf(x.value) >= 0 : x.value === v; });
+    });
+  }
+
+  // ---- 下書き(この端末に自動保存。本人がPINでログインしたときだけ復元される) ----
+  const dKey = 'draft:a:' + S.st.staffId + ':' + sv.surveyId;
+  const dLabel = h('div', { class: 'draft' });
+  const save = draftSaver(dKey, readAns, dLabel);
+  S.flush = save.flush;
+  const draft = draftLoad(dKey);
+  let dNote = null;
+  if (draft) {
+    fillAns(draft.v);
+    dNote = h('div', { class: 'ok' }, '前回の入力途中の内容(' + fmtTime(draft.t) + ' 保存)を復元しました。',
+      h('div', { style: 'margin-top:6px' }, h('button', { class: 'ghost small', onclick: () => {
+        if (!confirm('入力した内容をすべて消して、最初からやり直します。よろしいですか?')) return;
+        save.cancel(); lsDel(dKey); staffSurvey(sv);
+      } }, '下書きを消して最初から')));
+  }
+
+  const btn = h('button', { class: 'block' }, '送信する');
+  btn.addEventListener('click', () => {
+    setMsg(box, null);
+    const ans = readAns();
+    for (const q of qs) {
       const v = ans[q.id];
       if (q.required && (Array.isArray(v) ? !v.length : !String(v).trim())) return setMsg(box, errBox('「' + q.text + '」は必須です。'));
     }
+    save.cancel(); draftSave(dKey, ans);   // 送信に失敗しても入力が残るように
     withBusy(btn, call('submitAnswers', S.st.staffId, S.st.pin, sv.surveyId, ans).then(() => {
+      lsDel(dKey);
       S.st.surveys = S.st.surveys.filter(x => x.surveyId !== sv.surveyId);
       S.st.answered.push(sv.surveyId);
       staffDone(sv);
     }).catch(e => setMsg(box, errBox(e.message))));
   });
-  show(h('div', { class: 'row between' }, h('span', { class: 'tag' + (sv.anonymous ? '' : ' gray') }, sv.anonymous ? '無記名' : '記名'),
-      h('button', { class: 'ghost small', onclick: staffList }, '一覧に戻る')),
+  show(h('div', { class: 'row between' }, h('span', {}, audienceTag(sv), h('span', { class: 'tag' + (sv.anonymous ? '' : ' gray') }, sv.anonymous ? '無記名' : '記名')),
+      h('button', { class: 'ghost small', onclick: () => { save.flush(); staffList(); } }, '一覧に戻る')),
     h('h1', {}, sv.title),
-    sv.description ? h('div', { class: 'sub' }, sv.description) : null,
+    sv.description ? h('div', { class: 'sub', style: 'white-space:pre-wrap' }, sv.description) : null,
     h('div', { class: 'note' }, sv.anonymous
       ? 'このアンケートは無記名です。回答内容とお名前は紐づけて保存されません(回答済みかどうかだけが記録されます)。'
-      : 'このアンケートは記名式です。回答はお名前と一緒に保存されます。'),
-    blocks, box, btn);
+      : 'このアンケートは記名式です。回答はお名前と一緒に保存されます。',
+      h('div', { style: 'margin-top:4px' }, '入力途中の内容は、この端末に下書きとして自動保存されます。画面を閉じても、次にログインしたときに続きから入力できます(送信すると消えます)。')),
+    dNote,
+    h('div', { oninput: save, onchange: save }, blocks), box, btn, dLabel);
 }
 
 function staffDone(sv) {
@@ -473,11 +599,16 @@ function adminStaff(body) {
       h('table', {}, h('tr', {}, h('th', {}, '名前'), h('th', {}, '状態'), h('th', {}, '')),
         staff.map(s => h('tr', {},
           h('td', { style: s.active ? '' : 'color:#999' }, s.name),
-          h('td', {}, s.active ? null : h('span', { class: 'tag gray' }, '無効'),
+          h('td', {}, s.director ? h('span', { class: 'tag lav' }, '園長') : null,
+            s.active ? null : h('span', { class: 'tag gray' }, '無効'),
             s.active && !s.pinChanged ? h('span', { class: 'tag warn' }, '初期PIN') : null,
             s.locked ? h('span', { class: 'tag warn' }, 'ロック中') : null),
           h('td', {}, h('div', { class: 'row' },
             h('button', { class: 'ghost small', onclick: () => renderRename(s) }, '名前を修正'),
+            h('button', { class: 'ghost small', onclick: () => {
+              if (!confirm(s.director ? s.name + ' さんを「園長」から外します。よろしいですか?' : s.name + ' さんを「園長」に設定します。「園長のみ」のアンケートが表示されるようになります。よろしいですか?')) return;
+              call('adminSetDirector', S.ad.cred, s.staffId, !s.director).then(load).catch(e => setMsg(listMsg, errBox(e.message)));
+            } }, s.director ? '園長を外す' : '園長にする'),
             h('button', { class: 'ghost small', onclick: () => {
               if (!confirm(s.name + ' さんのPINをリセットします。よろしいですか?')) return;
               call('adminResetPin', S.ad.cred, s.staffId).then(r => {
@@ -559,6 +690,7 @@ function adminStaff(body) {
     h('div', { class: 'card' }, h('div', { class: 'row between' }, h('h2', { style: 'margin:0' }, '職員一覧'), sortBtn), listMsg, listBox,
       h('div', { class: 'sub', style: 'margin-top:8px' }, 'ここでの並び順が、職員のログイン画面の名前の一覧や、回答状況の表示順になります。新しく追加した職員は一番下に入ります。'),
       h('div', { class: 'sub', style: 'margin-top:4px' }, '職員は、回答画面の「+ 新規作成」から自分でアンケートを作成できます。作成した職員がそのアンケートの管理者になり、園長は園内のすべてのアンケートを確認できます。'),
+      h('div', { class: 'sub', style: 'margin-top:4px' }, '「園長にする」を押した職員には、全園共通の「園長のみ」アンケートが表示されます(園長も職員として名前を登録してください)。'),
       h('div', { class: 'sub', style: 'margin-top:4px' }, '退職・異動した方は「無効にする」を選ぶと、名前が回答画面に出なくなります(過去の回答は残ります)。')));
   load();
 }
@@ -596,18 +728,19 @@ function adminSurveys(body) {
   call('adminGetSurveys', S.ad.cred).then(list => {
     if (!list.length) return listBox.replaceChildren(h('div', { class: 'card sub' }, 'まだアンケートがありません。上のボタンから作りましょう。'));
     listBox.replaceChildren(...list.map(v => h('div', { class: 'card' },
-      h('div', {}, v.all ? h('span', { class: 'tag lav' }, '全園共通') : null,
+      h('div', {}, v.all ? h('span', { class: 'tag lav' }, '全園共通') : null, audienceTag(v),
         h('span', { class: 'tag' + (v.anonymous ? '' : ' gray') }, v.anonymous ? '無記名' : '記名'),
         h('span', { class: 'tag ' + (v.open ? '' : 'warn') }, v.open ? '受付中' : '受付終了')),
       h('h2', { style: 'margin-top:6px' }, v.title),
       h('div', { class: 'sub' }, v.all
-        ? '作成: ' + v.managerName + ' / 対象: 全園の全職員 / 期限: ' + fmtDate(v.deadline)
+        ? '作成: ' + v.managerName + ' / 対象: ' + (v.audience === 'director' ? '全園の園長' : '全園の全職員') + ' / 期限: ' + fmtDate(v.deadline)
         : '管理者: ' + v.managerName + ' / 対象: ' + (v.targetAll ? '全員' : '選択した職員') + ' / 期限: ' + fmtDate(v.deadline)),
       h('div', { class: 'prog' }, h('div', { class: 'bar' }, h('i', { style: 'width:' + (v.target ? Math.round(v.completedActive * 100 / v.target) : 0) + '%' })), h('span', {}, v.completedActive + '/' + v.target + '人')),
       v.all ? facilityProgress(v.byFacility) : (v.people && v.people.length ? statusGroups(v.people) : null),
       h('div', { class: 'row', style: 'margin-top:10px' },
         h('button', { class: 'small', onclick: () => adminResults(v.surveyId) }, '結果'),
         h('button', { class: 'ghost small', onclick: () => adminShareText(v) }, 'Chatwork用の依頼文'),
+        v.canEdit === false ? null : h('button', { class: 'ghost small', onclick: () => adminQuestionVisibility(v) }, '設問の表示・非表示'),
         v.canEdit === false ? null : h('button', { class: 'ghost small', onclick: () => {
           call('adminSetSurveyStatus', S.ad.cred, v.surveyId, v.status === 'open' ? 'closed' : 'open').then(adminMain).catch(e => setMsg(box, errBox(e.message)));
         } }, v.status === 'open' ? '受付を締め切る' : '受付を再開'),
@@ -623,6 +756,7 @@ function surveyUrl(id) { return BOOT.baseUrl + '?s=' + id; }
 function adminShareText(v) {
   const text = '【アンケートのお願い】\n' + v.title + '\n'
     + (v.deadline ? '回答期限: ' + fmtDate(v.deadline) + '\n' : '')
+    + (v.audience === 'director' ? '※各園の園長の方が対象です\n' : '')
     + (v.anonymous ? '※無記名(回答内容とお名前は紐づきません)\n' : '')
     + '\n▼回答はこちら\n' + surveyUrl(v.surveyId) + '\n\n'
     + '園と名前を選び、PIN(4桁)を入力してください。\n※共有のスマホ・パソコンでは、回答後に「終了」を押してください。';
@@ -636,10 +770,14 @@ function adminCreate() {
   const deadline = h('input', { type: 'date' });
   const anon = h('input', { type: 'radio', name: 'anon', value: '1' });
   const named = h('input', { type: 'radio', name: 'anon', value: '0', checked: true });
+  // 回答者(全園共通のみ): 全職員 / 園長のみ
+  const audAll = h('input', { type: 'radio', name: 'aud', value: '', checked: true });
+  const audDir = h('input', { type: 'radio', name: 'aud', value: 'director' });
   const qList = [];
   const qBox = h('div');
+  const qMsg = h('div');
   const box = h('div');
-  const addBtn = h('button', { class: 'ghost', onclick: () => addQ() }, '+ 設問を追加');
+  const addBtn = h('button', { class: 'ghost', onclick: () => { addQ(); saveDraft(); } }, '+ 設問を追加');
 
   // ---- 対象者・管理者の選択 ----
   let picks = [];      // 対象者 [{ s, cb }]
@@ -669,42 +807,125 @@ function adminCreate() {
   }).catch(e => tgtList.replaceChildren(errBox(e.message)));
   const saveBtn = h('button', { class: 'block' }, '作成する');
 
-  function addQ() {
-    const text = h('input', { type: 'text', placeholder: '設問文' });
+  // init: 取り込み・下書きからの初期値 { text, note, type, options, required, low, high, hidden }
+  function addQ(init) {
+    init = init || {};
+    const text = h('input', { type: 'text', placeholder: '設問文', value: init.text || '' });
+    const note = h('textarea', { placeholder: '補足説明(任意)。設問の下に表示されます(例・記入のヒントなど)', style: 'min-height:56px;font-size:14px', value: init.note || '' });
     const type = h('select', {}, h('option', { value: 'single' }, '選択式(1つ選ぶ)'), h('option', { value: 'multi' }, '選択式(複数選べる)'), h('option', { value: 'scale' }, '5段階評価(1〜5)'), h('option', { value: 'text' }, '自由記述'));
-    const opts = h('textarea', { placeholder: '選択肢を1行に1つずつ\n例:\nはい\nいいえ', style: 'min-height:80px' });
-    const req = h('input', { type: 'checkbox', checked: true });
+    if (init.type) type.value = init.type;
+    const opts = h('textarea', { placeholder: '選択肢を1行に1つずつ\n例:\nはい\nいいえ', style: 'min-height:80px', value: (init.options || []).join('\n') });
+    const req = h('input', { type: 'checkbox', checked: init.required === undefined ? true : init.required });
+    const hid = h('input', { type: 'checkbox', checked: !!init.hidden });
     const optWrap = h('div', {}, opts);
-    const low = h('input', { type: 'text', maxlength: '20', placeholder: '例: そう思わない' });
-    const high = h('input', { type: 'text', maxlength: '20', placeholder: '例: そう思う' });
+    const low = h('input', { type: 'text', maxlength: '20', placeholder: '例: そう思わない', value: init.low || '' });
+    const high = h('input', { type: 'text', maxlength: '20', placeholder: '例: そう思う', value: init.high || '' });
     const scaleWrap = h('div', { style: 'display:none' },
       h('div', { class: 'sub' }, '1と5の意味(任意)'),
       h('div', { class: 'row', style: 'flex-wrap:nowrap' }, h('span', { class: 'sub' }, '1:'), low, h('span', { class: 'sub' }, '5:'), high));
-    const q = { text, type, opts, req, low, high };
+    const q = { text, note, type, opts, req, hid, low, high };
     const wrap = h('div', { class: 'qbox' },
-      h('div', { class: 'row between' }, h('b', { class: 'qn' }), h('button', { class: 'danger small', onclick: () => { qList.splice(qList.indexOf(q), 1); wrap.remove(); renum(); } }, '削除')),
-      text, h('div', { style: 'margin-top:8px' }, type), h('div', { style: 'margin-top:8px' }, optWrap, scaleWrap),
-      h('label', { style: 'display:block;margin-top:8px;font-size:14px' }, req, ' 必須にする'));
-    type.addEventListener('change', () => {
+      h('div', { class: 'row between' }, h('b', { class: 'qn' }), h('button', { class: 'danger small', onclick: () => { qList.splice(qList.indexOf(q), 1); wrap.remove(); renum(); saveDraft(); } }, '削除')),
+      text, h('div', { style: 'margin-top:6px' }, note), h('div', { style: 'margin-top:8px' }, type), h('div', { style: 'margin-top:8px' }, optWrap, scaleWrap),
+      h('div', { class: 'row', style: 'margin-top:8px;font-size:14px;gap:16px' },
+        h('label', {}, req, ' 必須にする'),
+        h('label', {}, hid, ' 非表示にする(回答画面・結果に出さない)')));
+    function applyType() {
       optWrap.style.display = (type.value === 'text' || type.value === 'scale') ? 'none' : '';
       scaleWrap.style.display = type.value === 'scale' ? '' : 'none';
-    });
+    }
+    function applyHidden() { wrap.classList.toggle('off', hid.checked); }
+    type.addEventListener('change', applyType);
+    hid.addEventListener('change', applyHidden);
+    applyType(); applyHidden();
     q.wrap = wrap; qList.push(q); qBox.append(wrap); renum();
   }
   function renum() { qList.forEach((q, i) => { q.wrap.querySelector('.qn').textContent = '設問 ' + (i + 1); }); }
-  addQ();
+  function readQ(q) {
+    return { text: q.text.value, note: q.note.value, type: q.type.value, options: q.opts.value.split('\n'), required: q.req.checked,
+      low: q.low.value, high: q.high.value, hidden: q.hid.checked };
+  }
+
+  // ---- 文章から取り込む ----
+  const impText = h('textarea', { style: 'min-height:200px;font-size:14px', placeholder: 'Wordなどの文章をそのまま貼り付けてください。\n\n例:\nこのアンケートは…(最初の設問より前は「説明」になります)\n\n## Q1. 今年度の振り返り\n例: うまくいったこと、課題など\n回答：\n\n## Q2. …' });
+  const impOut = h('div');
+  const impPanel = h('div', { class: 'card imp', style: 'display:none' },
+    h('h2', {}, '文章から取り込む'),
+    h('div', { class: 'sub' }, '「## Q1. ○○」のような見出しが設問文になります(「Q1.」は外します)。見出しから「回答：」までの文章は、その設問の補足説明として設問の下に表示されます。最初の設問より前の文章はアンケートの説明になります。'),
+    h('div', { class: 'sub', style: 'margin-top:4px' }, '取り込んだ設問はすべて「自由記述・任意」になります。あとから1問ずつ種類や必須を変えられます。'),
+    h('div', { style: 'margin-top:8px' }, impText),
+    h('div', { class: 'row', style: 'margin-top:8px' },
+      h('button', { class: 'small', onclick: previewImport }, '読み取る'),
+      h('button', { class: 'ghost small', onclick: () => { impPanel.style.display = 'none'; } }, '閉じる')),
+    impOut);
+  const impBtn = h('button', { class: 'ghost', onclick: () => {
+    impPanel.style.display = '';
+    impPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    impText.focus();
+  } }, '文章から取り込む');
+  function previewImport() {
+    const p = parseSurveyText(impText.value);
+    if (!p.questions.length) return setMsg(impOut, errBox('設問が見つかりませんでした。「## Q1. ○○」のような見出しがあるか確認してください。'));
+    const blank = qList.every(q => !q.text.value.trim());
+    function apply(replace) {
+      if (replace) { qList.forEach(q => q.wrap.remove()); qList.length = 0; }
+      p.questions.forEach(x => addQ({ text: x.text, note: x.note, type: 'text', required: false }));
+      if (p.title && !title.value.trim()) title.value = p.title;
+      if (p.description && desc.value.trim() !== p.description) {
+        if (!desc.value.trim() || confirm('説明(任意)の欄を、取り込んだ説明文に置き換えますか?\n(キャンセルすると今の説明のままにします)')) desc.value = p.description;
+      }
+      impText.value = ''; impPanel.style.display = 'none'; setMsg(impOut, null);
+      setMsg(qMsg, h('div', { class: 'ok' }, p.questions.length + '問を取り込みました(すべて自由記述・任意)。必要に応じて、設問ごとに種類や必須を変更してください。'));
+      saveDraft();
+      qMsg.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    setMsg(impOut, h('div', { class: 'qbox' },
+      p.title ? h('div', {}, h('b', {}, 'タイトル: '), p.title, title.value.trim() ? h('span', { class: 'sub' }, '(入力済みのタイトルを優先します)') : null) : null,
+      h('div', {}, h('b', {}, '説明: '), p.description ? h('div', { class: 'qnote' }, p.description) : h('span', { class: 'sub' }, 'なし')),
+      h('div', { style: 'margin-top:6px' }, h('b', {}, '設問 ' + p.questions.length + '問')),
+      h('ol', {}, p.questions.map(x => h('li', {}, x.text, x.note ? h('div', { class: 'sub' }, '補足: ' + (x.note.length > 50 ? x.note.slice(0, 50) + '…' : x.note)) : null))),
+      h('div', { class: 'row', style: 'margin-top:8px' }, blank
+        ? h('button', { class: 'small', onclick: () => apply(true) }, 'この内容で設問を作る')
+        : [h('button', { class: 'small', onclick: () => apply(true) }, '今の設問と置き換える'),
+           h('button', { class: 'ghost small', onclick: () => apply(false) }, '今の設問の後ろに追加')])));
+  }
+
+  // ---- 下書き(この端末に自動保存。作成が済んだら消す) ----
+  const dKey = 'draft:c:' + (S.ad.cred.staffId || S.ad.cred.fid) + ':' + (isAll() ? 'ALL' : 'ONE');
+  const dLabel = h('div', { class: 'draft' });
+  const saveDraft = draftSaver(dKey, () => ({ title: title.value, desc: desc.value, deadline: deadline.value,
+    anon: anon.checked, dir: audDir.checked, questions: qList.map(readQ) }), dLabel);
+  S.flush = saveDraft.flush;
+  const draft = draftLoad(dKey);
+  let dNote = null;
+  if (draft) {
+    const d = draft.v;
+    title.value = d.title || ''; desc.value = d.desc || ''; deadline.value = d.deadline || '';
+    anon.checked = !!d.anon; named.checked = !d.anon; audDir.checked = !!d.dir; audAll.checked = !d.dir;
+    (d.questions || []).forEach(x => addQ(x));
+    dNote = h('div', { class: 'ok' }, '前回の作成途中の内容(' + fmtTime(draft.t) + ' 保存)を復元しました。対象者・管理者は選び直してください。',
+      h('div', { style: 'margin-top:6px' }, h('button', { class: 'ghost small', onclick: () => {
+        if (!confirm('作成途中の内容をすべて消して、最初からやり直します。よろしいですか?')) return;
+        saveDraft.cancel(); lsDel(dKey); adminCreate();
+      } }, '下書きを消して最初から')));
+  }
+  if (!qList.length) addQ();
 
   saveBtn.addEventListener('click', () => {
     setMsg(box, null);
     const all = isAll();
+    const qs = qList.map(readQ);
+    if (qs.length && qs.every(q => q.hidden)) return setMsg(box, errBox('すべての設問が「非表示」になっています。少なくとも1問は表示してください。'));
     const sv = {
       title: title.value, description: desc.value, deadline: deadline.value, anonymous: anon.checked,
       scope: all ? 'ALL' : '',
+      audience: all && audDir.checked ? 'director' : '',
       managerIds: all ? [] : mgrPicks.filter(p => p.cb.checked).map(p => p.s.staffId),
       targets: (all || (picks.length && picks.every(p => p.cb.checked))) ? 'all' : picks.filter(p => p.cb.checked).map(p => p.s.staffId),
-      questions: qList.map(q => ({ text: q.text.value, type: q.type.value, options: q.opts.value.split('\n'), required: q.req.checked, low: q.low.value, high: q.high.value })),
+      questions: qs,
     };
     withBusy(saveBtn, call('adminCreateSurvey', S.ad.cred, sv).then(r => {
+      saveDraft.cancel(); lsDel(dKey);
       call('adminGetSurveys', S.ad.cred).then(list => {
         const v = list.find(x => x.surveyId === r.surveyId);
         if (v) adminShareText(v); else adminMain();
@@ -727,8 +948,10 @@ function adminCreate() {
       mgrList);
   const allCard = h('div', { class: 'card' },
       h('h2', {}, '対象者と公開範囲'),
-      h('div', { class: 'sub' }, '全園すべての職員が対象になります。結果は各園の園長と統括が見られ、園別に比べることもできます。'),
-      h('div', { class: 'sub', style: 'margin-top:4px' }, '締め切り・削除は、作成した人と統括が行えます。'));
+      h('label', { class: 'opt' }, audAll, h('span', {}, h('b', {}, '全園の全職員'), h('div', { class: 'sub' }, '全園すべての職員が回答します。'))),
+      h('label', { class: 'opt' }, audDir, h('span', {}, h('b', {}, '園長のみ'), h('div', { class: 'sub' }, '各園の「職員」タブで「園長」に設定された人にだけ表示されます。園長が設定されていない園は対象者0人になります。'))),
+      h('div', { class: 'sub', style: 'margin-top:8px' }, '結果は各園の園長と統括が見られ、園別に比べることもできます。'),
+      h('div', { class: 'sub', style: 'margin-top:4px' }, '締め切り・削除・設問の表示/非表示は、作成した人と統括が行えます。'));
   function applyScope() {
     const a = isAll();
     targetCard.style.display = a ? 'none' : '';
@@ -737,9 +960,11 @@ function adminCreate() {
   }
   applyScope();
 
-  show(h('button', { class: 'ghost small', onclick: S.ad.createFrom === 'staff' ? staffLoadList : adminMain }, '← 戻る'),
+  show(h('div', { oninput: saveDraft, onchange: saveDraft },
+    h('button', { class: 'ghost small', onclick: () => { saveDraft.flush(); (S.ad.createFrom === 'staff' ? staffLoadList : adminMain)(); } }, '← 戻る'),
     h('h1', {}, isAll() ? '全園共通アンケートを作成' : 'アンケートを作成'),
     isAll() ? h('div', { class: 'tag lav' }, '全園共通') : (S.ad.admin ? h('div', { class: 'sub' }, S.ad.title + 'だけのアンケートです(他の園からは見えません)。') : null),
+    dNote,
     h('div', { class: 'card' },
       h('label', { class: 'f' }, 'タイトル'), title, h('label', { class: 'f' }, '説明(任意)'), desc,
       h('label', { class: 'f' }, '回答期限(任意・この日の終わりまで回答できます)'), deadline,
@@ -748,20 +973,56 @@ function adminCreate() {
       h('label', { class: 'opt' }, anon, h('span', {}, h('b', {}, '無記名'), h('div', { class: 'sub' }, '回答内容は名前と紐づけません。未回答者(回答済みかどうか)だけ確認できます。'))),
       h('div', { class: 'note' }, '無記名の結果は、回答が' + '3件以上' + 'たまってから表示されます(少人数で個人が特定されるのを防ぐため)。全園共通の園別集計も、園ごとに3件以上で表示されます。')),
     targetCard, mgrCard, allCard,
-    h('h3', {}, '設問'), qBox, addBtn, box, saveBtn);
+    h('div', { class: 'row between', style: 'margin-top:16px' }, h('h3', { style: 'margin:0' }, '設問'), impBtn),
+    impPanel, qMsg, qBox,
+    addBtn, box, saveBtn, dLabel));
+}
+
+// 公開後に設問ごとの表示・非表示を切り替える(データは消さない)
+function adminQuestionVisibility(v) {
+  const back = h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る');
+  show(back, h('div', { class: 'sub' }, '読み込み中…'));
+  call('adminGetResults', S.ad.cred, v.surveyId).then(r => {
+    const qs = r.survey.questions;
+    const box = h('div');
+    const rows = qs.map(q => {
+      const cb = h('input', { type: 'checkbox', checked: !q.hidden });
+      const lab = h('label', { class: 'opt' }, cb, h('span', {}, q.text, q.note ? h('div', { class: 'sub' }, q.note.length > 60 ? q.note.slice(0, 60) + '…' : q.note) : null));
+      const paint = () => { lab.style.opacity = cb.checked ? '' : '.5'; };
+      cb.addEventListener('change', paint); paint();
+      return { q: q, cb: cb, lab: lab };
+    });
+    const saveBtn = h('button', { class: 'block' }, '保存する');
+    saveBtn.addEventListener('click', () => {
+      setMsg(box, null);
+      if (rows.every(x => !x.cb.checked)) return setMsg(box, errBox('少なくとも1問は表示してください。'));
+      const hiddenIds = rows.filter(x => !x.cb.checked).map(x => x.q.id);
+      withBusy(saveBtn, call('adminSetHiddenQuestions', S.ad.cred, v.surveyId, hiddenIds).then(() => {
+        setMsg(box, h('div', { class: 'ok' }, '保存しました。表示 ' + (rows.length - hiddenIds.length) + '問 / 非表示 ' + hiddenIds.length + '問'));
+      }).catch(e => setMsg(box, errBox(e.message))));
+    });
+    show(back, h('h1', {}, '設問の表示・非表示'), h('div', { class: 'sub' }, v.title),
+      h('div', { class: 'note' }, 'チェックを外した設問は、回答画面に出なくなり、結果画面・CSVからも外れます。すでに集まった回答は消えないので、チェックを付け直せば元に戻ります。'),
+      h('div', { class: 'card' }, h('div', { class: 'row', style: 'margin-bottom:6px' },
+        h('button', { class: 'ghost small', onclick: () => rows.forEach(x => { x.cb.checked = true; x.cb.dispatchEvent(new Event('change')); }) }, 'すべて表示')),
+        rows.map(x => x.lab)),
+      box, saveBtn);
+  }).catch(e => show(back, errBox(e.message)));
 }
 
 function adminResults(surveyId) {
   show(h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る'), h('div', { class: 'sub' }, '読み込み中…'));
   call('adminGetResults', S.ad.cred, surveyId).then(r => {
     const sv = r.survey;
+    const qs = visibleQs(sv), nHidden = sv.questions.length - qs.length;
     const head = [
       h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る'),
-      h('div', { style: 'margin-top:8px' }, sv.all ? h('span', { class: 'tag lav' }, '全園共通') : null,
+      h('div', { style: 'margin-top:8px' }, sv.all ? h('span', { class: 'tag lav' }, '全園共通') : null, audienceTag(sv),
         h('span', { class: 'tag' + (sv.anonymous ? '' : ' gray') }, sv.anonymous ? '無記名' : '記名'),
         h('span', { class: 'tag ' + (sv.open ? '' : 'warn') }, sv.open ? '受付中' : '受付終了')),
       h('h1', {}, sv.title),
       h('div', { class: 'sub' }, '回答 ' + r.count + '件 / 期限: ' + fmtDate(sv.deadline)),
+      nHidden ? h('div', { class: 'note' }, '非表示の設問が' + nHidden + '問あります(結果・CSVには含めていません)。一覧の「設問の表示・非表示」から表示に戻せます。') : null,
     ];
     // CSV(全体分。全園共通では「園」の列が付く)
     if (!r.hidden) {
@@ -802,15 +1063,15 @@ function adminResults(surveyId) {
       if (hidden) {
         nodes.push(h('div', { class: 'note' }, '無記名アンケートのため、' + (g ? 'この園の' : '') + '回答が' + r.minAnon + '件以上になるまで結果は表示されません(現在 ' + count + '件)。'));
       } else {
-        sv.questions.forEach((q, i) => nodes.push(questionCard(q, i, summary.find(x => x.id === q.id), count)));
+        qs.forEach((q, i) => nodes.push(questionCard(q, i, summary.find(x => x.id === q.id), count)));
         if (r.people) {
           const people = g ? r.people.filter(p => p.facility === g.name) : r.people;
           nodes.push(h('div', { class: 'card' }, h('h2', {}, '個人別の回答'),
             people.length === 0 ? h('div', { class: 'sub' }, 'まだ回答がありません。') :
             h('div', { style: 'overflow-x:auto' }, h('table', {},
-              h('tr', {}, h('th', {}, '名前'), sv.all && !g ? h('th', {}, '園') : null, sv.questions.map((q, i) => h('th', {}, (i + 1) + '. ' + q.text))),
+              h('tr', {}, h('th', {}, '名前'), sv.all && !g ? h('th', {}, '園') : null, qs.map((q, i) => h('th', {}, (i + 1) + '. ' + q.text))),
               people.map(p => h('tr', {}, h('td', {}, p.name), sv.all && !g ? h('td', {}, p.facility.replace('こども保育園', '')) : null,
-                sv.questions.map(q => { const v = p.answers[q.id]; return h('td', {}, Array.isArray(v) ? v.join('、') : v); })))))));
+                qs.map(q => { const v = p.answers[q.id]; return h('td', {}, Array.isArray(v) ? v.join('、') : v); })))))));
         }
       }
       nodes.push(statusCard(g));
@@ -865,6 +1126,9 @@ function adminResults(surveyId) {
 }
 
 // ---------- 起動 ----------
+// 画面を閉じる・アプリを切り替える直前に、保存待ちの下書きを保存する
+window.addEventListener('pagehide', () => { if (S.flush) S.flush(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && S.flush) S.flush(); });
 if (BOOT.mode === 'admin') adminLogin(); else staffLogin();
 </script>
 </body>
