@@ -381,7 +381,7 @@ function staffLogin() {
       h('label', { class: 'f' }, '名前'), nameSel,
       h('label', { class: 'f' }, 'PIN(4桁)'), pin,
       box, btn),
-    h('div', { class: 'note' }, 'この端末にはログイン情報を残しません。共有のスマホでも安心して使えます。PINを忘れたときは園長に伝えてください。'),
+    h('div', { class: 'note' }, 'この端末にPINは残りません。ただし、回答途中の内容は送信するまでこの端末に保存されます。園の業務用スマホ・パソコンではなく、ご自身のスマホなどで回答してください。PINを忘れたときは園長に伝えてください。'),
     h('div', { class: 'center', style: 'margin-top:28px' }, h('button', { class: 'ghost small', onclick: adminLogin }, '園長・統括の方はこちら')));
 }
 
@@ -809,6 +809,8 @@ function adminSurveys(body) {
   }).catch(e => setMsg(box, errBox(e.message)));
 }
 
+// 依頼文・催促文に付ける注意書き(回答途中の下書きは送信するまで端末に残るため)
+const DEVICE_NOTICE = '※回答途中の内容は、送信するまで使った端末に保存されます。園の業務用スマホ・パソコンではなく、ご自身のスマホなどで回答してください。';
 function surveyUrl(id) { return BOOT.baseUrl + '?s=' + id; }
 
 function adminShareText(v) {
@@ -817,7 +819,7 @@ function adminShareText(v) {
     + (v.audience === 'director' ? '※各園の園長の方が対象です\n' : '')
     + (v.anonymous ? '※無記名(回答内容とお名前は紐づきません)\n' : '')
     + '\n▼回答はこちら\n' + surveyUrl(v.surveyId) + '\n\n'
-    + '園と名前を選び、PIN(4桁)を入力してください。\n※共有のスマホ・パソコンでは、回答後に「終了」を押してください。';
+    + '園と名前を選び、PIN(4桁)を入力してください。\n' + DEVICE_NOTICE;
   show(h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る'), h('h1', {}, 'Chatwork用の依頼文'),
     h('div', { class: 'card' }, copyBox(text, 'コピー'), h('div', { class: 'sub', style: 'margin-top:8px' }, 'Chatworkのグループチャットに貼り付けて送信してください。')));
 }
@@ -1188,7 +1190,7 @@ function adminResults(surveyId) {
       const reminder = '【アンケート回答のお願い】\n' + sv.title + '\n'
         + (sv.deadline ? '回答期限: ' + fmtDate(sv.deadline) + '\n' : '')
         + '\nまだ回答が届いていない方がいます。お手数ですが、ご回答をお願いします。\n'
-        + '\n未回答:\n' + pendLines.join('\n') + '\n\n▼回答はこちら\n' + surveyUrl(sv.surveyId);
+        + '\n未回答:\n' + pendLines.join('\n') + '\n\n▼回答はこちら\n' + surveyUrl(sv.surveyId) + '\n\n' + DEVICE_NOTICE;
       return h('div', { class: 'card' }, h('h2', {}, '回答状況' + (g ? '(' + g.name + ')' : '')), blocks,
         sv.anonymous ? h('div', { class: 'sub', style: 'margin-top:8px' }, '無記名でも、回答済みかどうかは記録されるため確認できます(回答内容とは紐づきません)。') : null,
         pendLines.length ? h('div', { style: 'margin-top:12px' }, h('b', {}, 'Chatwork用の催促文'),
