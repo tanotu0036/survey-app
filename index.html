@@ -273,6 +273,8 @@ function facilityProgress(list) {
 // 非表示の設問は回答画面・結果・CSVに出さない(データは残っている)
 function visibleQs(sv) { return (sv.questions || []).filter(q => !q.hidden); }
 function audienceTag(v) { return v.audience === 'director' ? h('span', { class: 'tag warn' }, '園長のみ') : null; }
+// 設問単位の「園長だけに聞く」
+function dirTag(q) { return q.directorOnly ? h('span', { class: 'tag lav', style: 'margin-left:6px;font-weight:600' }, '園長のみ') : null; }
 function csvCell(v) {
   let t = Array.isArray(v) ? v.join('、') : (v === null || v === undefined ? '' : String(v));
   if (/^[=+\-@\t\r]/.test(t)) t = "'" + t;   // Excelで数式として実行されるのを防ぐ
@@ -281,7 +283,7 @@ function csvCell(v) {
 function resultsCsv(r) {
   const qs = visibleQs(r.survey), anon = r.survey.anonymous, all = !!r.survey.all;
   const fcol = all ? ['園'] : [];
-  const rows = [[anon ? '回答番号' : '名前'].concat(fcol, anon ? [] : ['回答状況'], qs.map((q, i) => 'Q' + (i + 1) + ' ' + q.text))];
+  const rows = [[anon ? '回答番号' : '名前'].concat(fcol, anon ? [] : ['回答状況'], qs.map((q, i) => 'Q' + (i + 1) + ' ' + q.text + (q.directorOnly ? '(園長のみ)' : '')))];
   if (anon) {
     (r.anonRows || []).forEach((a, i) => rows.push([String(i + 1)].concat(all ? [a._f || '(非表示)'] : [], qs.map(q => a[q.id]))));
   } else {
@@ -457,7 +459,7 @@ function staffSurvey(sv) {
       body = q.options.map((o, j) => h('label', { class: 'opt' }, inputs[q.id][j], h('span', {}, o)));
     }
     return h('div', { class: 'card' },
-      h('div', { style: 'font-weight:600' }, (i + 1) + '. ' + q.text, q.required ? h('span', { class: 'req' }, '必須') : null),
+      h('div', { style: 'font-weight:600' }, (i + 1) + '. ' + q.text, q.required ? h('span', { class: 'req' }, '必須') : null, dirTag(q)),
       q.note ? h('div', { class: 'qnote' }, q.note) : null,
       q.type === 'multi' ? h('div', { class: 'sub' }, '複数選べます') : null,
       body);
@@ -817,18 +819,20 @@ function adminCreate() {
     const opts = h('textarea', { placeholder: '選択肢を1行に1つずつ\n例:\nはい\nいいえ', style: 'min-height:80px', value: (init.options || []).join('\n') });
     const req = h('input', { type: 'checkbox', checked: init.required === undefined ? true : init.required });
     const hid = h('input', { type: 'checkbox', checked: !!init.hidden });
+    const dir = h('input', { type: 'checkbox', checked: !!init.directorOnly });
     const optWrap = h('div', {}, opts);
     const low = h('input', { type: 'text', maxlength: '20', placeholder: '例: そう思わない', value: init.low || '' });
     const high = h('input', { type: 'text', maxlength: '20', placeholder: '例: そう思う', value: init.high || '' });
     const scaleWrap = h('div', { style: 'display:none' },
       h('div', { class: 'sub' }, '1と5の意味(任意)'),
       h('div', { class: 'row', style: 'flex-wrap:nowrap' }, h('span', { class: 'sub' }, '1:'), low, h('span', { class: 'sub' }, '5:'), high));
-    const q = { text, note, type, opts, req, hid, low, high };
+    const q = { text, note, type, opts, req, hid, dir, low, high };
     const wrap = h('div', { class: 'qbox' },
       h('div', { class: 'row between' }, h('b', { class: 'qn' }), h('button', { class: 'danger small', onclick: () => { qList.splice(qList.indexOf(q), 1); wrap.remove(); renum(); saveDraft(); } }, '削除')),
       text, h('div', { style: 'margin-top:6px' }, note), h('div', { style: 'margin-top:8px' }, type), h('div', { style: 'margin-top:8px' }, optWrap, scaleWrap),
       h('div', { class: 'row', style: 'margin-top:8px;font-size:14px;gap:16px' },
         h('label', {}, req, ' 必須にする'),
+        h('label', {}, dir, ' 園長だけに聞く(他の職員には表示しない)'),
         h('label', {}, hid, ' 非表示にする(回答画面・結果に出さない)')));
     function applyType() {
       optWrap.style.display = (type.value === 'text' || type.value === 'scale') ? 'none' : '';
@@ -843,7 +847,7 @@ function adminCreate() {
   function renum() { qList.forEach((q, i) => { q.wrap.querySelector('.qn').textContent = '設問 ' + (i + 1); }); }
   function readQ(q) {
     return { text: q.text.value, note: q.note.value, type: q.type.value, options: q.opts.value.split('\n'), required: q.req.checked,
-      low: q.low.value, high: q.high.value, hidden: q.hid.checked };
+      low: q.low.value, high: q.high.value, hidden: q.hid.checked, directorOnly: q.dir.checked };
   }
 
   // ---- 文章から取り込む ----
@@ -916,6 +920,9 @@ function adminCreate() {
     const all = isAll();
     const qs = qList.map(readQ);
     if (qs.length && qs.every(q => q.hidden)) return setMsg(box, errBox('すべての設問が「非表示」になっています。少なくとも1問は表示してください。'));
+    if (!(all && audDir.checked) && qs.some(q => !q.hidden) && qs.filter(q => !q.hidden).every(q => q.directorOnly)) {
+      return setMsg(box, errBox('表示する設問がすべて「園長だけに聞く」になっています。' + (all ? '回答者を「園長のみ」にしてください。' : '園長以外にも聞く設問を1問以上入れてください。')));
+    }
     const sv = {
       title: title.value, description: desc.value, deadline: deadline.value, anonymous: anon.checked,
       scope: all ? 'ALL' : '',
@@ -987,7 +994,7 @@ function adminQuestionVisibility(v) {
     const box = h('div');
     const rows = qs.map(q => {
       const cb = h('input', { type: 'checkbox', checked: !q.hidden });
-      const lab = h('label', { class: 'opt' }, cb, h('span', {}, q.text, q.note ? h('div', { class: 'sub' }, q.note.length > 60 ? q.note.slice(0, 60) + '…' : q.note) : null));
+      const lab = h('label', { class: 'opt' }, cb, h('span', {}, q.text, dirTag(q), q.note ? h('div', { class: 'sub' }, q.note.length > 60 ? q.note.slice(0, 60) + '…' : q.note) : null));
       const paint = () => { lab.style.opacity = cb.checked ? '' : '.5'; };
       cb.addEventListener('change', paint); paint();
       return { q: q, cb: cb, lab: lab };
@@ -1079,13 +1086,19 @@ function adminResults(surveyId) {
     }
 
     function questionCard(q, i, s, count) {
-      const card = h('div', { class: 'card' }, h('div', { style: 'font-weight:600' }, (i + 1) + '. ' + q.text));
+      const card = h('div', { class: 'card' }, h('div', { style: 'font-weight:600' }, (i + 1) + '. ' + q.text, dirTag(q)));
+      // 無記名で回答が少ない園長だけの設問は、個人が特定されないように表示しない(GAS側で中身を送らない)
+      if (s.few) {
+        card.append(h('div', { class: 'note' }, '園長だけの設問で回答が' + r.minAnon + '件未満のため、無記名を守るために表示しません(現在 ' + s.n + '件)。'));
+        return card;
+      }
       if (q.type === 'text') {
         if (!s.texts.length) card.append(h('div', { class: 'sub' }, '回答なし'));
         s.texts.forEach(t => card.append(h('div', { class: 'txt' }, t)));
         return card;
       }
-      const total = Math.max(count, 1);
+      // 割合の分母: その設問に答えた人数(園長だけの設問は園長の人数)。古いデータで n がなければ回答件数
+      const total = Math.max(s.n !== undefined ? s.n : count, 1);
       if (q.type === 'scale') {
         const n = q.options.reduce((a, o) => a + (s.counts[o] || 0), 0);
         const sum = q.options.reduce((a, o) => a + Number(o) * (s.counts[o] || 0), 0);
