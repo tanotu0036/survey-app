@@ -151,6 +151,12 @@ function show(...nodes) {
   app.replaceChildren(...nodes.flat(Infinity).filter(n => n !== null && n !== undefined && n !== false));
   try { window.scrollTo(0, 0); } catch (e) {}
 }
+// 入力欄の高さを中身に合わせる(画面に出ていない間は何もしない)
+function autoGrow(el) {
+  if (!el.isConnected) return;
+  el.style.height = 'auto';
+  el.style.height = (el.scrollHeight + 4) + 'px';
+}
 function errBox(msg) { return h('div', { class: 'err' }, msg); }
 function setMsg(box, node) { box.replaceChildren(...(node ? [node] : [])); }
 function withBusy(btn, promise) {
@@ -812,8 +818,12 @@ function adminCreate() {
   // init: 取り込み・下書きからの初期値 { text, note, type, options, required, low, high, hidden }
   function addQ(init) {
     init = init || {};
-    const text = h('input', { type: 'text', placeholder: '設問文', value: init.text || '' });
-    const note = h('textarea', { placeholder: '補足説明(任意)。設問の下に表示されます(例・記入のヒントなど)', style: 'min-height:56px;font-size:14px', value: init.note || '' });
+    // 設問文は長くても全文が見えるように、折り返して高さを自動で伸ばす(改行は入れない)
+    const text = h('textarea', { rows: '1', placeholder: '設問文', style: 'min-height:0;resize:none;overflow:hidden', value: init.text || '',
+      onkeydown: e => { if (e.key === 'Enter' && !e.isComposing) e.preventDefault(); },
+      oninput: () => { if (/\n/.test(text.value)) text.value = text.value.replace(/\s*\n\s*/g, ' '); autoGrow(text); } });
+    const note = h('textarea', { placeholder: '補足説明(任意)。設問の下に表示されます(例・記入のヒントなど)', style: 'min-height:56px;font-size:14px;overflow:hidden', value: init.note || '',
+      oninput: () => autoGrow(note) });
     const type = h('select', {}, h('option', { value: 'single' }, '選択式(1つ選ぶ)'), h('option', { value: 'multi' }, '選択式(複数選べる)'), h('option', { value: 'scale' }, '5段階評価(1〜5)'), h('option', { value: 'text' }, '自由記述'));
     if (init.type) type.value = init.type;
     const opts = h('textarea', { placeholder: '選択肢を1行に1つずつ\n例:\nはい\nいいえ', style: 'min-height:80px', value: (init.options || []).join('\n') });
@@ -843,6 +853,8 @@ function adminCreate() {
     hid.addEventListener('change', applyHidden);
     applyType(); applyHidden();
     q.wrap = wrap; qList.push(q); qBox.append(wrap); renum();
+    // 画面に出てから高さを合わせる(取り込み・下書きの復元で最初から文字が入っている場合)
+    requestAnimationFrame(() => { autoGrow(text); autoGrow(note); });
   }
   function renum() { qList.forEach((q, i) => { q.wrap.querySelector('.qn').textContent = '設問 ' + (i + 1); }); }
   function readQ(q) {
