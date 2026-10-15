@@ -82,7 +82,12 @@
   .scale-ends { display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--sub); margin-top:4px; }
   .avg { font-size:22px; font-weight:700; color:var(--main-ink); }
   /* 設問の補足説明・非表示・下書き・取り込み */
-  .qnote { font-size:13px; color:var(--sub); white-space:pre-wrap; margin:4px 0 8px; padding:8px 12px; background:#fbf9fe; border-left:3px solid var(--lav); border-radius:0 10px 10px 0; }
+  .qnote { font-size:13px; color:var(--sub); white-space:pre-wrap; margin:4px 0 8px; padding:8px 12px; background:#fff; border-left:3px solid #cfe3f5; border-radius:0 10px 10px 0; }
+  /* 作成画面: 設問文(主)は空色の太枠、補足説明(副)は白地に左の線で一段下げる */
+  textarea.qtext { background:#e3f0fb; border:2px solid #a8cff0; color:#2f5878; font-weight:600; min-height:0; resize:none; overflow:hidden; }
+  textarea.qtext:focus { border-color:#7fb6e6; box-shadow:0 0 0 3px #e3f0fb; }
+  textarea.qnotein { margin-left:14px; width:calc(100% - 14px); background:#fff; border:1px solid #edf2f7; border-left:3px solid #cfe3f5; border-radius:0 10px 10px 0; color:#6b6880; font-size:14px; min-height:56px; overflow:hidden; }
+  textarea.qnotein:focus { border-color:#cfe3f5; border-left-color:#a8cff0; box-shadow:0 0 0 3px #f0f6fc; }
   .qbox.off { opacity:.6; background:#f6f5f8; }
   .draft { font-size:12px; color:var(--sub); text-align:right; min-height:1.4em; margin-top:6px; }
   .imp ol { margin:6px 0; padding-left:1.8em; font-size:14px; }
@@ -819,10 +824,10 @@ function adminCreate() {
   function addQ(init) {
     init = init || {};
     // 設問文は長くても全文が見えるように、折り返して高さを自動で伸ばす(改行は入れない)
-    const text = h('textarea', { rows: '1', placeholder: '設問文', style: 'min-height:0;resize:none;overflow:hidden', value: init.text || '',
+    const text = h('textarea', { rows: '1', class: 'qtext', placeholder: '設問文', value: init.text || '',
       onkeydown: e => { if (e.key === 'Enter' && !e.isComposing) e.preventDefault(); },
       oninput: () => { if (/\n/.test(text.value)) text.value = text.value.replace(/\s*\n\s*/g, ' '); autoGrow(text); } });
-    const note = h('textarea', { placeholder: '補足説明(任意)。設問の下に表示されます(例・記入のヒントなど)', style: 'min-height:56px;font-size:14px;overflow:hidden', value: init.note || '',
+    const note = h('textarea', { class: 'qnotein', placeholder: '補足説明(任意)。設問の下に表示されます(例・記入のヒントなど)', value: init.note || '',
       oninput: () => autoGrow(note) });
     const type = h('select', {}, h('option', { value: 'single' }, '選択式(1つ選ぶ)'), h('option', { value: 'multi' }, '選択式(複数選べる)'), h('option', { value: 'scale' }, '5段階評価(1〜5)'), h('option', { value: 'text' }, '自由記述'));
     if (init.type) type.value = init.type;
