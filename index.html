@@ -816,6 +816,8 @@ function adminSurveys(body) {
       S.ad.admin ? h('button', { style: 'background:var(--lav);border-color:#c9bff0;color:var(--lav-ink)', onclick: () => { S.ad.createFrom = ''; S.ad.createScope = 'ALL'; adminCreate(); } }, '+ 全園共通アンケート') : null)),
     S.ad.admin && !S.ad.hq ? h('div', { class: 'sub', style: 'margin:6px 0 0' }, '「この園のアンケート」は他の園からは見えません。「全園共通アンケート」は全園の職員が対象で、結果は各園長と統括が見られます。') : null,
     box, listBox].filter(Boolean));
+  // 修正を保存した直後などのお知らせ(1回だけ出す)
+  if (S.ad.notice) { setMsg(box, h('div', { class: 'ok' }, S.ad.notice)); S.ad.notice = ''; }
   call('adminGetSurveys', S.ad.cred).then(list => {
     if (!list.length) return listBox.replaceChildren(h('div', { class: 'card sub' }, 'まだアンケートがありません。上のボタンから作りましょう。'));
     listBox.replaceChildren(...list.map(v => h('div', { class: 'card' },
@@ -831,6 +833,7 @@ function adminSurveys(body) {
       h('div', { class: 'row', style: 'margin-top:10px' },
         h('button', { class: 'small', onclick: () => adminResults(v.surveyId) }, '結果'),
         h('button', { class: 'ghost small', onclick: () => adminShareText(v) }, 'Chatwork用の依頼文'),
+        v.canEdit === false ? null : h('button', { class: 'ghost small', onclick: () => adminEdit(v) }, '内容を修正'),
         v.canEdit === false ? null : h('button', { class: 'ghost small', onclick: () => adminQuestionVisibility(v) }, '設問の表示・非表示'),
         v.canEdit === false ? null : h('button', { class: 'ghost small', onclick: () => {
           call('adminSetSurveyStatus', S.ad.cred, v.surveyId, v.status === 'open' ? 'closed' : 'open').then(adminMain).catch(e => setMsg(box, errBox(e.message)));
@@ -857,7 +860,20 @@ function adminShareText(v) {
     h('div', { class: 'card' }, copyBox(text, 'コピー'), h('div', { class: 'sub', style: 'margin-top:8px' }, 'Chatworkのグループチャットに貼り付けて送信してください。')));
 }
 
-function adminCreate() {
+// 公開後の修正: 中身と「回答がある設問」を読み込んでから、作成画面を修正モードで開く
+function adminEdit(v) {
+  const back = h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る');
+  show(back, h('div', { class: 'sub' }, '読み込み中…'));
+  call('adminGetSurveyForEdit', S.ad.cred, v.surveyId).then(adminCreate).catch(e => show(back, errBox(e.message)));
+}
+
+// edit: 修正するときは adminGetSurveyForEdit の結果。新規作成のときは undefined
+function adminCreate(edit) {
+  if (edit && !edit.surveyId) edit = undefined;   // ボタンのクリックイベントなどが渡ってきた場合
+  // 回答がある設問(種類の変更・削除・選択肢を消すことはできない)
+  const answered = new Set(edit ? edit.answered : []);
+  const prevById = {};
+  (edit ? edit.questions : []).forEach(q => { prevById[q.id] = q; });
   const title = h('input', { type: 'text', maxlength: '100', placeholder: '例: 9月の行事アンケート' });
   const desc = h('textarea', { placeholder: '説明(任意)', style: 'min-height:70px' });
   const deadline = h('input', { type: 'date' });
@@ -886,8 +902,15 @@ function adminCreate() {
   function updateCount() { counter.textContent = picks.filter(p => p.cb.checked).length + ' / ' + picks.length + '人を選択中'; }
   function setAll(v) { picks.forEach(p => { p.cb.checked = v; }); updateCount(); }
   // ---- 範囲(一覧のボタンで決まる。統括は常に全園共通、職員は園内のみ) ----
-  const isAll = () => !!S.ad.hq || (S.ad.admin && S.ad.createScope === 'ALL');
-  if (!isAll()) call('adminGetStaff', S.ad.cred).then(list => {
+  const isAll = () => edit ? !!edit.all : (!!S.ad.hq || (S.ad.admin && S.ad.createScope === 'ALL'));
+  // 修正では記名・無記名、回答者、対象者、管理者は変えられない
+  if (edit) {
+    title.value = edit.title || ''; desc.value = edit.description || ''; deadline.value = edit.deadline || '';
+    anon.checked = !!edit.anonymous; named.checked = !edit.anonymous;
+    audDir.checked = edit.audience === 'director'; audAll.checked = !audDir.checked;
+    [anon, named, audAll, audDir].forEach(x => { x.disabled = true; });
+  }
+  if (!edit && !isAll()) call('adminGetStaff', S.ad.cred).then(list => {
     // 管理者: 職員が作るときは本人が必ず入る(外せない)
     const me = S.ad.admin ? '' : S.ad.cred.staffId;
     mgrPicks = list.filter(s => s.active).map(s => ({ s: s, cb: h('input', { type: 'checkbox', checked: s.staffId === me, disabled: s.staffId === me, onchange: updateMgrCount }) }));
@@ -898,11 +921,12 @@ function adminCreate() {
     tgtList.replaceChildren(...picks.map(p => h('label', { class: 'opt' }, p.cb, h('span', {}, p.s.name))));
     updateCount();
   }).catch(e => tgtList.replaceChildren(errBox(e.message)));
-  const saveBtn = h('button', { class: 'block' }, '作成する');
+  const saveBtn = h('button', { class: 'block' }, edit ? '修正を保存する' : '作成する');
 
-  // init: 取り込み・下書きからの初期値 { text, note, type, options, required, low, high, hidden }
+  // init: 取り込み・下書き・修正元からの初期値 { id, text, note, type, options, required, low, high, hidden, directorOnly }
   function addQ(init) {
     init = init || {};
+    const locked = !!(init.id && answered.has(init.id));   // 回答がある設問
     // 設問文は長くても全文が見えるように、折り返して高さを自動で伸ばす(改行は入れない)
     const text = h('textarea', { rows: '1', class: 'qtext', placeholder: '設問文', value: init.text || '',
       onkeydown: e => { if (e.key === 'Enter' && !e.isComposing) e.preventDefault(); },
@@ -921,9 +945,15 @@ function adminCreate() {
     const scaleWrap = h('div', { style: 'display:none' },
       h('div', { class: 'sub' }, '1と5の意味(任意)'),
       h('div', { class: 'row', style: 'flex-wrap:nowrap' }, h('span', { class: 'sub' }, '1:'), low, h('span', { class: 'sub' }, '5:'), high));
-    const q = { text, note, type, opts, req, hid, dir, low, high };
+    const q = { id: init.id || '', text, note, type, opts, req, hid, dir, low, high };
+    if (locked) {
+      type.disabled = true;
+      optWrap.append(h('div', { class: 'sub' }, 'すでに回答があるため、今ある選択肢は消せません(追加はできます)。'));
+    }
     const wrap = h('div', { class: 'qbox' },
-      h('div', { class: 'row between' }, h('b', { class: 'qn' }), h('button', { class: 'danger small', onclick: () => { qList.splice(qList.indexOf(q), 1); wrap.remove(); renum(); saveDraft(); } }, '削除')),
+      h('div', { class: 'row between' }, h('b', { class: 'qn' }), locked
+        ? h('span', { class: 'sub' }, h('span', { class: 'tag gray' }, '回答あり'), '削除できません(非表示にできます)')
+        : h('button', { class: 'danger small', onclick: () => { qList.splice(qList.indexOf(q), 1); wrap.remove(); renum(); saveDraft(); } }, '削除')),
       text, h('div', { style: 'margin-top:6px' }, note), h('div', { style: 'margin-top:8px' }, type), h('div', { style: 'margin-top:8px' }, optWrap, scaleWrap),
       h('div', { class: 'row', style: 'margin-top:8px;font-size:14px;gap:16px' },
         h('label', {}, req, ' 必須にする'),
@@ -943,7 +973,7 @@ function adminCreate() {
   }
   function renum() { qList.forEach((q, i) => { q.wrap.querySelector('.qn').textContent = '設問 ' + (i + 1); }); }
   function readQ(q) {
-    return { text: q.text.value, note: q.note.value, type: q.type.value, options: q.opts.value.split('\n'), required: q.req.checked,
+    return { id: q.id, text: q.text.value, note: q.note.value, type: q.type.value, options: q.opts.value.split('\n'), required: q.req.checked,
       low: q.low.value, high: q.high.value, hidden: q.hid.checked, directorOnly: q.dir.checked };
   }
 
@@ -985,14 +1015,18 @@ function adminCreate() {
       h('div', {}, h('b', {}, '説明: '), p.description ? h('div', { class: 'qnote' }, p.description) : h('span', { class: 'sub' }, 'なし')),
       h('div', { style: 'margin-top:6px' }, h('b', {}, '設問 ' + p.questions.length + '問')),
       h('ol', {}, p.questions.map(x => h('li', {}, x.text, x.note ? h('div', { class: 'sub' }, '補足: ' + (x.note.length > 50 ? x.note.slice(0, 50) + '…' : x.note)) : null))),
-      h('div', { class: 'row', style: 'margin-top:8px' }, blank
+      // 修正では、回答がある設問を消さないように「後ろに追加」だけにする
+      h('div', { class: 'row', style: 'margin-top:8px' }, edit
+        ? h('button', { class: 'small', onclick: () => apply(false) }, '今の設問の後ろに追加')
+        : blank
         ? h('button', { class: 'small', onclick: () => apply(true) }, 'この内容で設問を作る')
         : [h('button', { class: 'small', onclick: () => apply(true) }, '今の設問と置き換える'),
            h('button', { class: 'ghost small', onclick: () => apply(false) }, '今の設問の後ろに追加')])));
   }
 
-  // ---- 下書き(この端末に自動保存。作成が済んだら消す) ----
-  const dKey = 'draft:c:' + (S.ad.cred.staffId || S.ad.cred.fid) + ':' + (isAll() ? 'ALL' : 'ONE');
+  // ---- 下書き(この端末に自動保存。作成・修正が済んだら消す) ----
+  const who = S.ad.cred.staffId || S.ad.cred.fid;
+  const dKey = edit ? 'draft:e:' + who + ':' + edit.surveyId : 'draft:c:' + who + ':' + (isAll() ? 'ALL' : 'ONE');
   const dLabel = h('div', { class: 'draft' });
   const saveDraft = draftSaver(dKey, () => ({ title: title.value, desc: desc.value, deadline: deadline.value,
     anon: anon.checked, dir: audDir.checked, questions: qList.map(readQ) }), dLabel);
@@ -1002,13 +1036,15 @@ function adminCreate() {
   if (draft) {
     const d = draft.v;
     title.value = d.title || ''; desc.value = d.desc || ''; deadline.value = d.deadline || '';
-    anon.checked = !!d.anon; named.checked = !d.anon; audDir.checked = !!d.dir; audAll.checked = !d.dir;
+    if (!edit) { anon.checked = !!d.anon; named.checked = !d.anon; audDir.checked = !!d.dir; audAll.checked = !d.dir; }
     (d.questions || []).forEach(x => addQ(x));
-    dNote = h('div', { class: 'ok' }, '前回の作成途中の内容(' + fmtTime(draft.t) + ' 保存)を復元しました。対象者・管理者は選び直してください。',
+    dNote = h('div', { class: 'ok' }, '前回の' + (edit ? '修正' : '作成') + '途中の内容(' + fmtTime(draft.t) + ' 保存)を復元しました。' + (edit ? '' : '対象者・管理者は選び直してください。'),
       h('div', { style: 'margin-top:6px' }, h('button', { class: 'ghost small', onclick: () => {
-        if (!confirm('作成途中の内容をすべて消して、最初からやり直します。よろしいですか?')) return;
-        saveDraft.cancel(); lsDel(dKey); adminCreate();
-      } }, '下書きを消して最初から')));
+        if (!confirm(edit ? '修正途中の内容をすべて消して、今公開している内容に戻します。よろしいですか?' : '作成途中の内容をすべて消して、最初からやり直します。よろしいですか?')) return;
+        saveDraft.cancel(); lsDel(dKey); edit ? adminEdit(edit) : adminCreate();
+      } }, edit ? '下書きを消して元に戻す' : '下書きを消して最初から')));
+  } else if (edit) {
+    edit.questions.forEach(x => addQ(x));
   }
   if (!qList.length) addQ();
 
@@ -1019,6 +1055,24 @@ function adminCreate() {
     if (qs.length && qs.every(q => q.hidden)) return setMsg(box, errBox('すべての設問が「非表示」になっています。少なくとも1問は表示してください。'));
     if (!(all && audDir.checked) && qs.some(q => !q.hidden) && qs.filter(q => !q.hidden).every(q => q.directorOnly)) {
       return setMsg(box, errBox('表示する設問がすべて「園長だけに聞く」になっています。' + (all ? '回答者を「園長のみ」にしてください。' : '園長以外にも聞く設問を1問以上入れてください。')));
+    }
+    if (edit) {
+      // 回答がある設問の選択肢を消していないか(GAS側でも確認する)
+      for (let i = 0; i < qs.length; i++) {
+        const prev = qs[i].id && answered.has(qs[i].id) ? prevById[qs[i].id] : null;
+        if (!prev) continue;
+        const now = qs[i].options.map(o => o.trim());
+        const missing = (prev.options || []).filter(o => now.indexOf(o) < 0);
+        if (missing.length && prev.type !== 'scale' && prev.type !== 'text') {
+          return setMsg(box, errBox('設問 ' + (i + 1) + ' の選択肢「' + missing.join('」「') + '」は、すでに回答があるため消せません。'));
+        }
+      }
+      return withBusy(saveBtn, call('adminUpdateSurvey', S.ad.cred, edit.surveyId,
+        { title: title.value, description: desc.value, deadline: deadline.value, questions: qs }).then(() => {
+        saveDraft.cancel(); lsDel(dKey);
+        S.ad.notice = '「' + title.value.trim() + '」の内容を修正しました。';
+        adminMain();
+      }).catch(e => setMsg(box, errBox(e.message))));
     }
     const sv = {
       title: title.value, description: desc.value, deadline: deadline.value, anonymous: anon.checked,
@@ -1058,16 +1112,20 @@ function adminCreate() {
       h('div', { class: 'sub', style: 'margin-top:4px' }, '締め切り・削除・設問の表示/非表示は、作成した人と統括が行えます。'));
   function applyScope() {
     const a = isAll();
-    targetCard.style.display = a ? 'none' : '';
-    mgrCard.style.display = a ? 'none' : '';
+    // 修正では対象者・管理者は変えないので出さない
+    targetCard.style.display = a || edit ? 'none' : '';
+    mgrCard.style.display = a || edit ? 'none' : '';
     allCard.style.display = a ? '' : 'none';
   }
   applyScope();
 
   show(h('div', { oninput: saveDraft, onchange: saveDraft },
-    h('button', { class: 'ghost small', onclick: () => { saveDraft.flush(); (S.ad.createFrom === 'staff' ? staffLoadList : adminMain)(); } }, '← 戻る'),
-    h('h1', {}, isAll() ? '全園共通アンケートを作成' : 'アンケートを作成'),
-    isAll() ? h('div', { class: 'tag lav' }, '全園共通') : (S.ad.admin ? h('div', { class: 'sub' }, S.ad.title + 'だけのアンケートです(他の園からは見えません)。') : null),
+    h('button', { class: 'ghost small', onclick: () => { saveDraft.flush(); (edit ? adminMain : S.ad.createFrom === 'staff' ? staffLoadList : adminMain)(); } }, '← 戻る'),
+    h('h1', {}, edit ? 'アンケートを修正' : isAll() ? '全園共通アンケートを作成' : 'アンケートを作成'),
+    isAll() ? h('div', { class: 'tag lav' }, '全園共通') : (S.ad.admin && !edit ? h('div', { class: 'sub' }, S.ad.title + 'だけのアンケートです(他の園からは見えません)。') : null),
+    edit ? h('div', { class: 'note' }, '公開中のアンケートを修正します。保存すると、すぐ回答画面に反映されます。',
+      h('div', { style: 'margin-top:4px' }, '記名・無記名、回答者、対象者、管理者は変えられません。'),
+      answered.size ? h('div', { style: 'margin-top:4px' }, 'すでに回答がある設問(「回答あり」の印)は、種類の変更と削除ができません。選択肢は追加だけできます。設問をやめたいときは「非表示」にしてください。') : null) : null,
     dNote,
     h('div', { class: 'card' },
       h('label', { class: 'f' }, 'タイトル'), title, h('label', { class: 'f' }, '説明(任意)'), desc,
