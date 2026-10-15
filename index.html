@@ -67,6 +67,18 @@
   .chip { padding:3px 13px; border-radius:99px; font-size:14px; border:1px solid var(--peach-line); background:var(--peach); color:var(--peach-ink); }
   .chip.done { background:#f1f1f4; border-color:#e2e2e8; color:#a6a6b3; }
   .chip.me { font-weight:700; border-width:2px; }
+  /* 職員の一覧の回答状況(H案) */
+  .pills { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  .pill { border-radius:99px; padding:1px 10px; font-size:12px; background:#f1f1f4; color:#7d7a8c; }
+  .pill.pend { background:var(--peach); color:var(--peach-ink); }
+  button.ptoggle { background:none; border:none; padding:4px 0; margin-top:4px; font-size:13px; font-weight:600; color:var(--lav-ink); }
+  button.ptoggle:hover { filter:none; text-decoration:underline; }
+  .pnames { border-top:1px solid var(--line); margin-top:4px; padding-top:8px; }
+  .pgrp { font-size:12px; font-weight:600; color:var(--sub); margin-top:8px; }
+  .pgrp.pend { color:var(--peach-ink); margin-top:0; }
+  .plist { font-size:14px; }
+  .plist.done { font-size:13px; color:var(--sub); }
+  .pme { color:var(--peach-ink); }
   .sortrow { display:flex; align-items:center; gap:8px; padding:8px 4px; border-bottom:1px solid var(--line); }
   .sortno { width:2em; text-align:right; color:var(--sub); font-size:13px; }
   .sortname { flex:1; }
@@ -265,20 +277,40 @@ function statusGroups(people) {
     h('div', { class: 'grp' }, '回答済み(' + done.length + '人)'),
     done.length ? h('div', { class: 'chips' }, done.map(p => h('span', { class: 'chip done' }, p.name))) : h('div', { class: 'sub' }, 'まだいません'));
 }
-// 職員の一覧画面に出す回答状況(回答済みはグレー・回答した順、未回答は色つき)
+// 職員の一覧画面に出す回答状況。
+// ふだんはバーと人数だけ。「名前を見る」で開くと、未回答(あなたが先頭)と回答済み(回答した順)を出す。
+// 遅れがちな人が「周りはもう済ませている」と気付けるようにするのが目的。
 function staffProgress(v) {
   const pr = v.progress;
   if (!pr || !pr.total) return null;
   // 無記名は人数だけ(名前は送られてこない)
   const people = pr.people || [];
-  const done = people.filter(p => p.done), pend = people.filter(p => !p.done);
+  const done = people.filter(p => p.done);   // GAS側で回答した順に並んでいる
+  const pend = people.filter(p => !p.done).sort((a, b) => (b.me ? 1 : 0) - (a.me ? 1 : 0));
+  const pendN = pr.total - pr.done;
+  // この一覧に出るのは自分がまだ答えていないアンケートだけなので、未回答には必ず自分が入っている
+  const names = h('div', { class: 'pnames' },
+    h('div', { class: 'pgrp pend' }, '未回答 ' + pendN + '人'),
+    h('div', { class: 'plist' }, pend.length ? pend.map((p, i) => [i ? '、' : '',
+      p.me ? h('b', { class: 'pme' }, p.name + '(あなた)') : p.name]) : 'なし'),
+    h('div', { class: 'pgrp' }, '回答済み ' + pr.done + '人(回答した順)'),
+    h('div', { class: 'plist done' }, done.length ? done.map((p, i) => (i ? '　' : '') + (i + 1) + '. ' + p.name) : 'まだいません'));
+  S.st.openProg = S.st.openProg || {};   // 開いた状態はアンケートごとに覚えておく(ログアウトまで)
+  const tog = h('button', { class: 'ptoggle', type: 'button' });
+  function apply() {
+    const open = !!S.st.openProg[v.surveyId];
+    names.style.display = open ? '' : 'none';
+    tog.textContent = open ? '▾ 名前を閉じる' : '▸ 名前を見る';
+  }
+  tog.addEventListener('click', () => { S.st.openProg[v.surveyId] = !S.st.openProg[v.surveyId]; apply(); });
+  apply();
   return h('div', { style: 'margin-top:10px' },
     h('div', { class: 'prog' }, h('div', { class: 'bar' }, h('i', { style: 'width:' + Math.round(pr.done * 100 / pr.total) + '%' })),
-      h('span', {}, (v.allOrg ? 'この園 ' : '') + pr.done + '/' + pr.total + '人が回答済み')),
-    v.allOrg && pr.allTotal ? h('div', { class: 'sub' }, '全園では ' + pr.allDone + '/' + pr.allTotal + '人が回答済み') : null,
-    people.length ? h('div', { class: 'chips' },
-      done.map(p => h('span', { class: 'chip done' }, p.name)),
-      pend.map(p => h('span', { class: 'chip' + (p.me ? ' me' : '') }, p.name + (p.me ? '(あなた)' : '')))) : null);
+      h('span', {}, (v.allOrg ? 'この園 ' : '') + pr.done + '/' + pr.total + '人' + (v.allOrg && pr.allTotal ? ' ・ 全園 ' + pr.allDone + '/' + pr.allTotal + '人' : ''))),
+    h('div', { class: 'pills' },
+      h('span', { class: 'pill pend' }, '未回答 ' + pendN + '人(あなたを含む)'),
+      h('span', { class: 'pill' }, '回答済み ' + pr.done + '人')),
+    people.length ? [tog, names] : null);
 }
 
 // 全園共通アンケートの園別回答状況(人数のバー)
