@@ -481,9 +481,8 @@ function staffList() {
   show(h('div', { class: 'row between' }, h('h1', {}, S.st.name + ' さん'), h('button', { class: 'ghost small', onclick: staffLogin }, 'ログアウト')),
     h('div', { class: 'row', style: 'margin:10px 0' },
       h('button', { onclick: openCreate }, '+ 新規作成'),
-      (S.st.managed + S.st.managedCollections) > 0 ? h('button', { class: 'ghost', onclick: openManage }, '自分が担当している'
-        + [S.st.managed ? 'アンケート' + S.st.managed + '件' : '', S.st.managedCollections ? '回収メモ' + S.st.managedCollections + '件' : ''].filter(Boolean).join('・')
-        + 'の管理') : null),
+      // 回収メモは下の「担当している回収メモ」カードから開くので、ここはアンケートだけ
+      S.st.managed > 0 ? h('button', { class: 'ghost', onclick: openManage }, '自分が担当しているアンケートの管理(' + S.st.managed + ')') : null),
     S.st.notice ? h('div', { class: 'note' }, S.st.notice) : null,
     list.length === 0
       ? h('div', { class: 'card center' }, h('h2', {}, '回答待ちのアンケートはありません'), h('div', { class: 'sub' }, '画面を閉じて大丈夫です。'))
@@ -510,7 +509,8 @@ function staffLoadList() {
     staffApply(r); staffList();
   }).catch(() => staffList());
 }
-function openManage() { staffAdminCtx(); if (!S.st.managed && S.st.managedCollections) S.ad.tab = 'collections'; adminMain(); }
+function openManage() { staffAdminCtx(); adminMain(); }
+function openManageCollections() { staffAdminCtx(); S.ad.tab = 'collections'; adminMain(); }
 // 回答画面から作成: アンケートか回収メモかを選ぶ(作成者は最初から管理者・担当者に入るが、代理作成のため外せる)
 function openCreate() { staffCreateChooser(); }
 
@@ -1214,7 +1214,11 @@ function staffCollectionsCard() {
   if (S.st.managedCollections > 0) {
     call('adminGetCollections', { staffId: S.st.staffId, pin: S.st.pin }).then(mine => {
       const open = mine.filter(m => m.open);
-      if (!open.length) return;
+      if (!open.length) {
+        if (mine.length) mgrSlot.replaceChildren(h('div', { class: 'center', style: 'margin-top:8px' },
+          h('button', { class: 'ghost small', onclick: openManageCollections }, '担当している回収メモ(締め切り済み)を見る')));
+        return;
+      }
       mgrSlot.replaceChildren(h('div', { class: 'card' },
         h('h2', {}, '担当している回収メモ'),
         h('div', { class: 'sub' }, '提出物を受け取ったら、チェックを入れてください。'),
@@ -1222,7 +1226,8 @@ function staffCollectionsCard() {
           h('div', { class: 'srow-main' },
             h('div', {}, m.all ? h('span', { class: 'tag lav' }, '全園共通') : null, h('b', {}, m.title)),
             h('div', { class: 'sub' }, m.received + '/' + m.target + '人 回収済み' + (m.deadline ? ' ・ 期限 ' + fmtDate(m.deadline) : ''))),
-          h('button', { class: 'small', onclick: () => openCollectionCheck(m.collectionId) }, 'チェックする')))));
+          h('button', { class: 'small', onclick: () => openCollectionCheck(m.collectionId) }, 'チェックする'))),
+        h('div', { style: 'margin-top:10px' }, h('button', { class: 'ghost small', onclick: openManageCollections }, '締め切り・削除・依頼文はこちら'))));
     }).catch(() => {});
   }
   return h('div', {}, pendCard, mgrSlot);
