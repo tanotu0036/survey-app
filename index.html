@@ -15,7 +15,9 @@
   }
   * { box-sizing: border-box; }
   body { margin:0; background:linear-gradient(180deg,#fdf4f8 0%,#f4f7fd 55%,#f2faf6 100%); background-attachment:fixed; color:var(--ink); font-family:-apple-system,"Hiragino Sans","Noto Sans JP",Meiryo,sans-serif; line-height:1.65; }
-  #app { max-width:720px; margin:0 auto; padding:16px 16px 48px; }
+  #app { max-width:720px; margin:0 auto; padding:16px 16px 24px; }
+  #ver { text-align:center; font-size:11px; color:#b3afc4; padding:0 16px 24px; }
+  #ver .old { color:var(--pink-ink); }
   h1 { font-size:20px; margin:8px 0 4px; }
   h2 { font-size:17px; margin:0 0 8px; }
   h3 { font-size:15px; margin:16px 0 6px; }
@@ -133,9 +135,19 @@
 </head>
 <body>
 <div id="app"></div>
+<div id="ver"></div>
 <script>
 // ====== GASの窓口(データの読み書きだけを担当) ======
 // GASのデプロイを「新バージョン」で更新する限り、このURLは変わりません。
+// ====== 版番号 ======
+// 画面(この index.html)を修正したら、ここの番号を上げて、下の更新履歴に1行足す。
+// 番号は「年.月.日-その日の何回目か」。GAS側の版番号(コード.gs の GAS_VERSION)とは別に数える。
+const APP_VERSION = '2026.10.26-1';
+// 更新履歴(画面)
+//  2026.10.26-1  版番号の表示を追加。回収メモ(提出物の回収管理)を追加。回収済みの人を下へ並べる、
+//                チェックした瞬間に色を変える、提出物の欄は未提出のものだけ表示、担当している回収メモのカード。
+//                アンケートの管理者・回収メモの担当者から、作成者を外せるようにした(代理作成)。
+
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzArLDP5bk6o9l0yoN1SCvu0aT69dIKvM-hYlCTYMHhZDgvWSfpCr2Ez9cNekm0DHNP/exec';
 
 // 起動情報はこのページのURLから読み取る(?s=アンケートID / ?admin=1)
@@ -1711,6 +1723,19 @@ function adminResults(surveyId) {
     show(...head, tabBar, view);
   }).catch(e => show(h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る'), errBox(e.message)));
 }
+
+// ---------- 版番号の表示 ----------
+// 画面の一番下に「画面 ver / GAS ver」を出す。GASの版が古いまま(デプロイ忘れ)だと気付けるようにする
+function showVersion() {
+  const el = document.getElementById('ver');
+  el.textContent = '画面 ver.' + APP_VERSION + ' / GAS ver.確認中…';
+  call('getVersion').then(r => {
+    el.textContent = '画面 ver.' + APP_VERSION + ' / GAS ver.' + r.version;
+  }).catch(() => {
+    el.replaceChildren('画面 ver.' + APP_VERSION + ' / ', h('span', { class: 'old' }, 'GAS ver.不明(GASが古い版のままの可能性があります)'));
+  });
+}
+showVersion();
 
 // ---------- 起動 ----------
 // 画面を閉じる・アプリを切り替える直前に、保存待ちの下書きを保存する
