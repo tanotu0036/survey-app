@@ -1198,31 +1198,34 @@ function fmtMDHM(t) {
 
 // 職員の一覧画面に出す「提出物」(自分の状況だけ。他の職員の状況やメモは届かない)
 function staffCollectionsCard() {
-  const list = S.st.collections || [];
-  if (!list.length) return null;
-  const rows = {};
-  const card = h('div', { class: 'card' },
-    h('h2', {}, '提出物'),
-    h('div', { class: 'sub' }, '担当者が受け取ると「受取済み」になります。'),
-    list.map(c => (rows[c.collectionId] = h('div', { class: 'srow' },
+  // 提出物: まだ受け取ってもらっていないものだけを出す(受け取られたら消える)
+  const pend = (S.st.collections || []).filter(c => !c.receivedAt);
+  const pendCard = pend.length ? h('div', { class: 'card' },
+    h('h2', {}, '提出物(' + pend.length + '件)'),
+    h('div', { class: 'sub' }, 'まだ提出していないものです。担当者が受け取ると、ここから消えます。'),
+    pend.map(c => h('div', { class: 'srow' },
       h('div', { class: 'srow-main' },
         h('div', {}, c.allOrg ? h('span', { class: 'tag lav' }, '全園共通') : null, h('b', {}, c.title)),
         c.deadline ? h('div', { class: 'sub' }, '提出期限 ' + fmtDate(c.deadline)) : null,
         c.description ? h('div', { class: 'sub', style: 'white-space:pre-wrap' }, c.description) : null),
-      h('div', { class: 'srow-side' },
-        c.receivedAt
-          ? h('span', { class: 'tag gray srow-st' }, fmtMD(c.receivedAt) + ' 受取済み')
-          : h('span', { class: 'tag warn srow-st' }, '未提出'))))));
-  // 自分が担当者の回収メモには、その場からチェック画面へ行けるボタンを付ける
+      h('span', { class: 'tag warn srow-st' }, '未提出')))) : null;
+  // 担当している回収メモ(受付中のもの): その場からチェック画面へ行ける
+  const mgrSlot = h('div');
   if (S.st.managedCollections > 0) {
     call('adminGetCollections', { staffId: S.st.staffId, pin: S.st.pin }).then(mine => {
-      mine.forEach(m => {
-        const r = rows[m.collectionId];
-        if (r) r.querySelector('.srow-side').append(h('button', { class: 'small', onclick: () => openCollectionCheck(m.collectionId) }, 'チェックする'));
-      });
+      const open = mine.filter(m => m.open);
+      if (!open.length) return;
+      mgrSlot.replaceChildren(h('div', { class: 'card' },
+        h('h2', {}, '担当している回収メモ'),
+        h('div', { class: 'sub' }, '提出物を受け取ったら、チェックを入れてください。'),
+        open.map(m => h('div', { class: 'srow' },
+          h('div', { class: 'srow-main' },
+            h('div', {}, m.all ? h('span', { class: 'tag lav' }, '全園共通') : null, h('b', {}, m.title)),
+            h('div', { class: 'sub' }, m.received + '/' + m.target + '人 回収済み' + (m.deadline ? ' ・ 期限 ' + fmtDate(m.deadline) : ''))),
+          h('button', { class: 'small', onclick: () => openCollectionCheck(m.collectionId) }, 'チェックする')))));
     }).catch(() => {});
   }
-  return card;
+  return h('div', {}, pendCard, mgrSlot);
 }
 // 職員(担当者)が回答画面から回収メモのチェック画面を開く
 function openCollectionCheck(collectionId) {
