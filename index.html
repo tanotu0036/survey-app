@@ -83,6 +83,7 @@
   .cmemo-wrap { grid-column:1 / -1; display:flex; align-items:center; gap:8px; }
   .cmemo { flex:1; padding:7px 10px !important; font-size:14px !important; }
   .cmemo-msg { white-space:nowrap; }
+  .cdiv { font-size:12px; font-weight:600; color:var(--sub); padding:12px 6px 4px; border-bottom:1px solid var(--line); }
   /* 職員の一覧の回答状況(H案) */
   .pills { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
   .pill { border-radius:99px; padding:1px 10px; font-size:12px; background:#f1f1f4; color:#7d7a8c; }
@@ -1397,18 +1398,28 @@ function collectionDetail(collectionId) {
         st, h('div', { class: 'cmemo-wrap' }, memo, memoMsg));
       function paint() {
         el.classList.toggle('got', !!p.receivedAt);
-        st.textContent = p.receivedAt ? fmtMDHM(p.receivedAt) + ' 受取(' + p.receivedBy + ')' : '未回収';
+        cb.checked = !!p.receivedAt;
+        st.textContent = p.saving ? (p.receivedAt ? '受取を記録中…' : '取り消し中…')
+          : p.receivedAt ? fmtMDHM(p.receivedAt) + ' 受取(' + p.receivedBy + ')' : '未回収';
       }
+      // チェックしたらすぐ色を変え、保存は後ろで進める(失敗したら元に戻す)
       cb.addEventListener('change', () => {
         const want = cb.checked;
+        if (p.saving) { cb.checked = !want; return; }
         if (!want && !confirm(p.name + ' さんの「受取済み」を取り消します。よろしいですか?')) { cb.checked = true; return; }
-        cb.disabled = true;
+        const prev = { at: p.receivedAt, by: p.receivedBy };
+        p.saving = true;
+        p.receivedAt = want ? (prev.at || 'saving') : ''; p.receivedBy = want ? prev.by : '';
+        paint(); drawProg(); drawRemind();
         call('adminMarkCollection', S.ad.cred, c.collectionId, p.staffId, want).then(m => {
-          p.receivedAt = m.receivedAt; p.receivedBy = m.receivedBy;
+          p.saving = false; p.receivedAt = m.receivedAt; p.receivedBy = m.receivedBy;
           paint(); drawProg(); drawRemind();
-          if (onlyPend.checked && p.receivedAt) setTimeout(drawList, 600);
-        }).catch(e => { cb.checked = !want; setMsg(msg, errBox(e.message)); })
-          .finally(() => { cb.disabled = false; });
+          redrawSoon();   // 回収済みの人は下へ移動する(少し待ってから並べ直す)
+        }).catch(e => {
+          p.saving = false; p.receivedAt = prev.at; p.receivedBy = prev.by;
+          paint(); drawProg(); drawRemind();
+          setMsg(msg, errBox(p.name + ' さんの記録を保存できませんでした。もう一度チェックしてください(' + e.message + ')'));
+        });
       });
       memo.addEventListener('change', () => {
         memoMsg.textContent = '保存中…';
@@ -1418,8 +1429,16 @@ function collectionDetail(collectionId) {
         }).catch(e => { memoMsg.textContent = ''; setMsg(msg, errBox(e.message)); });
       });
       memo.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) memo.blur(); });
+      // 並べ直しで行が作り直されても、入力した内容が消えないようにする
+      memo.addEventListener('input', () => { p.memo = memo.value; });
       paint();
       return el;
+    }
+    // 未回収の人を上、回収済みの人を下に並べる(それぞれの中は職員一覧の順)。
+    // 回収済みの前に区切りの見出しを入れる
+    function sortedRows(list) {
+      const pend = list.filter(p => !p.receivedAt), got = list.filter(p => p.receivedAt);
+      return pend.map(row).concat(got.length && !onlyPend.checked ? [h('div', { class: 'cdiv' }, '回収済み ' + got.length + '人')].concat(got.map(row)) : []);
     }
     function drawList() {
       const list = scoped().filter(p => !onlyPend.checked || !p.receivedAt);
@@ -1428,11 +1447,25 @@ function collectionDetail(collectionId) {
         // 全園: 園ごとに見出しを付ける
         listBox.replaceChildren(...d.facilities.map(f => {
           const fl = list.filter(p => p.facilityId === f.facilityId);
-          return fl.length ? [h('h3', {}, f.name)].concat(fl.map(row)) : null;
+          return fl.length ? [h('h3', {}, f.name)].concat(sortedRows(fl)) : null;
         }).filter(Boolean).flat());
       } else {
-        listBox.replaceChildren(...list.map(row));
+        listBox.replaceChildren(...sortedRows(list));
       }
+    }
+    // チェック直後にすぐ動くと押し間違えやすいので、少し待ってから並べ直す。
+    // メモを入力中のときは、入力が終わる(枠の外を押す)まで待つ
+    let redrawTimer = 0;
+    function redrawSoon() {
+      clearTimeout(redrawTimer);
+      redrawTimer = setTimeout(() => {
+        const a = document.activeElement;
+        if (a && a.classList && a.classList.contains('cmemo') && listBox.contains(a)) {
+          a.addEventListener('blur', () => setTimeout(redrawSoon, 0), { once: true });
+          return;
+        }
+        drawList();
+      }, 700);
     }
     function drawRemind() {
       const groups = c.all && !scope ? d.facilities.map(f => ({ name: f.name, list: people.filter(p => p.facilityId === f.facilityId) }))
@@ -1449,7 +1482,7 @@ function collectionDetail(collectionId) {
     function csv() {
       const head = ['名前'].concat(c.all ? ['園'] : [], ['状態', '受取日時', '受取者', 'メモ']);
       const rows = [head].concat(people.map(p => [p.name].concat(c.all ? [p.facility] : [],
-        [p.receivedAt ? '回収済み' : '未回収', p.receivedAt, p.receivedBy, p.memo])));
+        [p.receivedAt ? '回収済み' : '未回収', p.saving ? '' : p.receivedAt, p.receivedBy, p.memo])));
       return rows.map(r => r.map(csvCell).join(',')).join('\r\n');
     }
     onlyPend.addEventListener('change', drawList);
