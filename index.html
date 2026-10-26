@@ -68,6 +68,21 @@
   .chip { padding:3px 13px; border-radius:99px; font-size:14px; border:1px solid var(--peach-line); background:var(--peach); color:var(--peach-ink); }
   .chip.done { background:#f1f1f4; border-color:#e2e2e8; color:#a6a6b3; }
   .chip.me { font-weight:700; border-width:2px; }
+  /* 回収メモ */
+  .srow { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding:10px 0; border-top:1px solid var(--line); }
+  .srow-main { flex:1; min-width:0; }
+  .srow-st { white-space:nowrap; margin-top:2px; }
+  .crow { display:grid; grid-template-columns:1fr auto; gap:4px 10px; align-items:center; padding:10px 6px; border-bottom:1px solid var(--line); }
+  .crow.got { background:#f6faf8; }
+  .cchk { display:flex; align-items:center; gap:10px; cursor:pointer; min-width:0; }
+  .cchk input { transform:scale(1.35); accent-color:#8fc9b6; }
+  .cname { font-weight:600; }
+  .crow.got .cname { color:#8a8a99; }
+  .cstat { font-size:13px; color:var(--pink-ink); white-space:nowrap; }
+  .crow.got .cstat { color:var(--main-ink); }
+  .cmemo-wrap { grid-column:1 / -1; display:flex; align-items:center; gap:8px; }
+  .cmemo { flex:1; padding:7px 10px !important; font-size:14px !important; }
+  .cmemo-msg { white-space:nowrap; }
   /* 職員の一覧の回答状況(H案) */
   .pills { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
   .pill { border-radius:99px; padding:1px 10px; font-size:12px; background:#f1f1f4; color:#7d7a8c; }
@@ -402,7 +417,7 @@ function staffLogin() {
     withBusy(btn, call('staffLogin', staffId, p).then(r => {
       S.st = { staffId: staffId, pin: p, name: r.name };
       if (r.mustChangePin) return staffChangePin();
-      S.st.surveys = r.surveys; S.st.answered = r.answered; S.st.managed = r.managed;
+      staffApply(r);
       staffAfterLogin();
     }).catch(e => setMsg(box, errBox(e.message))));
   });
@@ -428,7 +443,7 @@ function staffChangePin() {
     if (!/^\d{4}$/.test(np.value)) return setMsg(box, errBox('4桁の数字で入力してください。'));
     if (np.value !== np2.value) return setMsg(box, errBox('2回の入力が一致しません。'));
     withBusy(btn, call('staffChangePin', S.st.staffId, S.st.pin, np.value).then(r => {
-      S.st.pin = np.value; S.st.surveys = r.surveys; S.st.answered = r.answered; S.st.managed = r.managed;
+      S.st.pin = np.value; staffApply(r);
       staffAfterLogin();
     }).catch(e => setMsg(box, errBox(e.message))));
   });
@@ -438,6 +453,12 @@ function staffChangePin() {
       h('div', { class: 'sub' }, '初期PIN(0000)は今回だけ使います。次回からは、ここで決めた番号を使います。'),
       h('label', { class: 'f' }, '新しいPIN(4桁の数字)'), np,
       h('label', { class: 'f' }, '確認'), np2, box, btn));
+}
+
+// ログイン・再読み込みの結果を画面状態に入れる
+function staffApply(r) {
+  S.st.surveys = r.surveys; S.st.answered = r.answered; S.st.managed = r.managed;
+  S.st.collections = r.collections || []; S.st.managedCollections = r.managedCollections || 0;
 }
 
 function staffAfterLogin() {
@@ -458,7 +479,9 @@ function staffList() {
   show(h('div', { class: 'row between' }, h('h1', {}, S.st.name + ' さん'), h('button', { class: 'ghost small', onclick: staffLogin }, 'ログアウト')),
     h('div', { class: 'row', style: 'margin:10px 0' },
       h('button', { onclick: openCreate }, '+ 新規作成'),
-      S.st.managed > 0 ? h('button', { class: 'ghost', onclick: openManage }, '自分が担当しているアンケートの管理(' + S.st.managed + ')') : null),
+      (S.st.managed + S.st.managedCollections) > 0 ? h('button', { class: 'ghost', onclick: openManage }, '自分が担当している'
+        + [S.st.managed ? 'アンケート' + S.st.managed + '件' : '', S.st.managedCollections ? '回収メモ' + S.st.managedCollections + '件' : ''].filter(Boolean).join('・')
+        + 'の管理') : null),
     S.st.notice ? h('div', { class: 'note' }, S.st.notice) : null,
     list.length === 0
       ? h('div', { class: 'card center' }, h('h2', {}, '回答待ちのアンケートはありません'), h('div', { class: 'sub' }, '画面を閉じて大丈夫です。'))
@@ -471,22 +494,23 @@ function staffList() {
           staffProgress(v),
           h('button', { class: 'block', onclick: () => staffSurvey(v) },
             draftLoad('draft:a:' + S.st.staffId + ':' + v.surveyId) ? '回答のつづきを入力する(下書きあり)' : '回答する'))),
+    staffCollectionsCard(),
     h('div', { class: 'center', style: 'margin-top:20px' }, h('button', { class: 'ghost', onclick: staffLogin }, '終了(ログアウト)')));
 }
 
 function staffAdminCtx() {
   S.ad = { cred: { staffId: S.st.staffId, pin: S.st.pin }, admin: false,
-    title: S.st.name + ' さん(担当アンケートの管理)', tab: 'surveys', back: staffLoadList, createFrom: '' };
+    title: S.st.name + ' さん(担当の管理)', tab: 'surveys', back: staffLoadList, createFrom: '' };
 }
 // 管理画面から回答画面へ戻るとき、担当件数などを最新にするため再取得する
 function staffLoadList() {
   call('staffLogin', S.st.staffId, S.st.pin).then(r => {
-    S.st.surveys = r.surveys; S.st.answered = r.answered; S.st.managed = r.managed; staffList();
+    staffApply(r); staffList();
   }).catch(() => staffList());
 }
-function openManage() { staffAdminCtx(); adminMain(); }
-// 回答画面から直接作成(ログインした職員が自動的にそのアンケートの管理者になる)
-function openCreate() { staffAdminCtx(); S.ad.createFrom = 'staff'; adminCreate(); }
+function openManage() { staffAdminCtx(); if (!S.st.managed && S.st.managedCollections) S.ad.tab = 'collections'; adminMain(); }
+// 回答画面から作成: アンケートか回収メモかを選ぶ(作成者は最初から管理者・担当者に入るが、代理作成のため外せる)
+function openCreate() { staffCreateChooser(); }
 
 function staffSurvey(sv) {
   S.st.notice = '';
@@ -617,14 +641,16 @@ function adminLogin() {
 }
 
 function adminMain() {
-  const tabs = S.ad.hq ? [['surveys', 'アンケート'], ['settings', '設定']]
-    : S.ad.admin ? [['surveys', 'アンケート'], ['staff', '職員'], ['settings', '設定']] : [['surveys', 'アンケート']];
+  const tabs = S.ad.hq ? [['surveys', 'アンケート'], ['collections', '回収メモ'], ['settings', '設定']]
+    : S.ad.admin ? [['surveys', 'アンケート'], ['collections', '回収メモ'], ['staff', '職員'], ['settings', '設定']]
+    : [['surveys', 'アンケート'], ['collections', '回収メモ']];
   const body = h('div');
-  const bar = S.ad.admin ? h('div', { class: 'tabs' }, tabs.map(t => h('button', {
+  const bar = tabs.length > 1 ? h('div', { class: 'tabs' }, tabs.map(t => h('button', {
     class: S.ad.tab === t[0] ? 'on' : '', onclick: () => { S.ad.tab = t[0]; adminMain(); } }, t[1]))) : null;
   show(h('div', { class: 'row between' }, h('h1', {}, S.ad.title), h('button', { class: 'ghost small', onclick: S.ad.back }, S.ad.admin ? 'ログアウト' : '← 回答画面へ')),
     bar, body);
   if (S.ad.tab === 'surveys') adminSurveys(body);
+  else if (S.ad.tab === 'collections') adminCollections(body);
   else if (S.ad.tab === 'staff') adminStaff(body);
   else adminSettings(body);
 }
@@ -895,8 +921,12 @@ function adminCreate(edit) {
   const mgrCounter = h('span', { class: 'sub' });
   function updateMgrCount() {
     const n = mgrPicks.filter(p => p.cb.checked).length;
-    mgrCounter.textContent = n ? n + '人を選択中' : (S.ad.admin ? '選択なし(園長だけが管理します)' : '');
+    mgrCounter.textContent = n ? n + '人を選択中' : '選択なし(園長だけが管理します)';
+    setMsg(mgrWarn, mgrMeOff() ? h('div', { class: 'note' }, 'あなた(作成者)を外しています。作成後、あなたはこのアンケートの進捗・結果を見られなくなります(代理で作成するとき向け)。') : null);
   }
+  const mgrWarn = h('div');
+  const mgrMe = S.ad.admin ? '' : S.ad.cred.staffId;
+  function mgrMeOff() { return !!mgrMe && mgrPicks.some(p => p.s.staffId === mgrMe && !p.cb.checked); }
   const counter = h('span', { class: 'sub' });
   const tgtList = h('div', {}, h('div', { class: 'sub' }, '読み込み中…'));
   function updateCount() { counter.textContent = picks.filter(p => p.cb.checked).length + ' / ' + picks.length + '人を選択中'; }
@@ -911,10 +941,10 @@ function adminCreate(edit) {
     [anon, named, audAll, audDir].forEach(x => { x.disabled = true; });
   }
   if (!edit && !isAll()) call('adminGetStaff', S.ad.cred).then(list => {
-    // 管理者: 職員が作るときは本人が必ず入る(外せない)
-    const me = S.ad.admin ? '' : S.ad.cred.staffId;
-    mgrPicks = list.filter(s => s.active).map(s => ({ s: s, cb: h('input', { type: 'checkbox', checked: s.staffId === me, disabled: s.staffId === me, onchange: updateMgrCount }) }));
-    mgrList.replaceChildren(...mgrPicks.map(p => h('label', { class: 'opt' }, p.cb, h('span', {}, p.s.name, p.s.staffId === me ? h('span', { class: 'sub' }, '(あなた)') : null))));
+    // 管理者: 職員が作るときは本人に最初からチェック。代理で作成する場合は外せる
+    const me = mgrMe;
+    mgrPicks = list.filter(s => s.active).map(s => ({ s: s, cb: h('input', { type: 'checkbox', checked: s.staffId === me, onchange: updateMgrCount }) }));
+    mgrList.replaceChildren(...mgrPicks.map(p => h('label', { class: 'opt' }, p.cb, h('span', {}, p.s.name, p.s.staffId === me ? h('span', { class: 'sub' }, '(あなた・作成者)') : null))));
     updateMgrCount();
     picks = list.filter(s => s.active).map(s => ({ s: s, cb: h('input', { type: 'checkbox', checked: true, onchange: updateCount }) }));
     if (!picks.length) return tgtList.replaceChildren(h('div', { class: 'err' }, '職員が登録されていません。先に「職員」タブで登録してください。'));
@@ -1082,8 +1112,18 @@ function adminCreate(edit) {
       targets: (all || (picks.length && picks.every(p => p.cb.checked))) ? 'all' : picks.filter(p => p.cb.checked).map(p => p.s.staffId),
       questions: qs,
     };
+    const meOff = mgrMeOff();
+    if (meOff && !confirm('あなた(作成者)が管理者に入っていません。作成後、あなたはこのアンケートの進捗・結果を見られなくなります。このまま作成しますか?')) return;
     withBusy(saveBtn, call('adminCreateSurvey', S.ad.cred, sv).then(r => {
       saveDraft.cancel(); lsDel(dKey);
+      // 自分を外した職員は一覧に出ないので、入力内容から依頼文を作る
+      if (meOff) {
+        S.st.notice = '「' + sv.title.trim() + '」を作成しました(管理者ではないため、あなたの管理画面には表示されません)。';
+        adminShareText({ surveyId: r.surveyId, title: sv.title.trim(), deadline: sv.deadline, audience: sv.audience, anonymous: sv.anonymous });
+        const b = app.querySelector('button');
+        if (b) b.replaceWith(h('button', { class: 'ghost small', onclick: staffLoadList }, '← 回答画面へ'));
+        return;
+      }
       call('adminGetSurveys', S.ad.cred).then(list => {
         const v = list.find(x => x.surveyId === r.surveyId);
         if (v) adminShareText(v); else adminMain();
@@ -1101,9 +1141,9 @@ function adminCreate(edit) {
   const mgrCard = h('div', { class: 'card' },
       h('h2', {}, '管理者'),
       h('div', { class: 'sub' }, 'このアンケートの進捗・結果を確認し、締め切りなどの管理ができる職員を選べます(例: 行事の担当者)。何人でも選べます。'),
-      h('div', { class: 'sub' }, S.ad.admin ? '園長は、選ばなくても常に管理できます。' : 'あなたは作成者なので、必ず管理者に入ります。'),
+      h('div', { class: 'sub' }, S.ad.admin ? '園長は、選ばなくても常に管理できます。' : 'あなた(作成者)には最初からチェックが入っています。代理で作成するときは外せます。'),
       h('div', { class: 'row', style: 'margin:10px 0' }, mgrCounter),
-      mgrList);
+      mgrWarn, mgrList);
   const allCard = h('div', { class: 'card' },
       h('h2', {}, '対象者と公開範囲'),
       h('label', { class: 'opt' }, audAll, h('span', {}, h('b', {}, '全園の全職員'), h('div', { class: 'sub' }, '全園すべての職員が回答します。'))),
@@ -1138,6 +1178,316 @@ function adminCreate(edit) {
     h('div', { class: 'row between', style: 'margin-top:16px' }, h('h3', { style: 'margin:0' }, '設問'), impBtn),
     impPanel, qMsg, qBox,
     addBtn, box, saveBtn, dLabel));
+}
+
+// ====================================================
+//  回収メモ(職員からの提出書類の回収管理)
+// ====================================================
+// 'yyyy-MM-dd HH:mm:ss' → '10月24日'
+function fmtMD(t) {
+  const m = String(t || '').match(/^\d{4}-(\d{2})-(\d{2})/);
+  return m ? Number(m[1]) + '月' + Number(m[2]) + '日' : '';
+}
+// 'yyyy-MM-dd HH:mm:ss' → '10/24 15:30'
+function fmtMDHM(t) {
+  const m = String(t || '').match(/^\d{4}-(\d{2})-(\d{2}) (\d{2}):(\d{2})/);
+  return m ? Number(m[1]) + '/' + Number(m[2]) + ' ' + m[3] + ':' + m[4] : '';
+}
+
+// 職員の一覧画面に出す「提出物」(自分の状況だけ。他の職員の状況やメモは届かない)
+function staffCollectionsCard() {
+  const list = S.st.collections || [];
+  if (!list.length) return null;
+  return h('div', { class: 'card' },
+    h('h2', {}, '提出物'),
+    h('div', { class: 'sub' }, '担当者が受け取ると「受取済み」になります。'),
+    list.map(c => h('div', { class: 'srow' },
+      h('div', { class: 'srow-main' },
+        h('div', {}, c.allOrg ? h('span', { class: 'tag lav' }, '全園共通') : null, h('b', {}, c.title)),
+        c.deadline ? h('div', { class: 'sub' }, '提出期限 ' + fmtDate(c.deadline)) : null,
+        c.description ? h('div', { class: 'sub', style: 'white-space:pre-wrap' }, c.description) : null),
+      c.receivedAt
+        ? h('span', { class: 'tag gray srow-st' }, fmtMD(c.receivedAt) + ' 受取済み')
+        : h('span', { class: 'tag warn srow-st' }, '未提出'))));
+}
+
+// 職員の「+ 新規作成」: アンケートか回収メモかを選ぶ
+function staffCreateChooser() {
+  show(h('button', { class: 'ghost small', onclick: staffList }, '← 戻る'),
+    h('h1', {}, '新規作成'),
+    h('div', { class: 'card' },
+      h('button', { class: 'block', style: 'margin-top:0', onclick: () => { staffAdminCtx(); S.ad.createFrom = 'staff'; adminCreate(); } }, 'アンケートを作る'),
+      h('div', { class: 'sub', style: 'margin-top:6px' }, '職員に質問して、回答を集めます。'),
+      h('button', { class: 'block', style: 'background:var(--peach);border-color:var(--peach-line);color:var(--peach-ink)',
+        onclick: () => { staffAdminCtx(); S.ad.createFrom = 'staff'; S.ad.tab = 'collections'; collectionCreate(); } }, '回収メモを作る'),
+      h('div', { class: 'sub', style: 'margin-top:6px' }, '健康診断書など、職員からの提出物を「誰が出したか・まだか」で管理します。')));
+}
+
+function collectionShareText(c, after) {
+  const text = '【提出のお願い】\n' + c.title + '\n'
+    + (c.deadline ? '提出期限: ' + fmtDate(c.deadline) + '\n' : '')
+    + (c.audience === 'director' ? '※各園の園長の方が対象です\n' : '')
+    + (c.description ? '\n' + c.description + '\n' : '')
+    + '\n担当者に提出してください。\n提出状況は、職員アンケートのアプリ(ログイン後の画面の「提出物」)で確認できます。\n' + BOOT.baseUrl;
+  show(h('button', { class: 'ghost small', onclick: after || adminMain }, after ? '← 一覧へ' : '← 戻る'), h('h1', {}, 'Chatwork用の依頼文'),
+    h('div', { class: 'card' }, copyBox(text, 'コピー'), h('div', { class: 'sub', style: 'margin-top:8px' }, 'Chatworkのグループチャットに貼り付けて送信してください。')));
+}
+
+// ---- 回収メモタブ(一覧) ----
+function adminCollections(body) {
+  const box = h('div');
+  const listBox = h('div', {}, h('div', { class: 'sub' }, '読み込み中…'));
+  const newBtn = (scope, label, lav) => h('button', {
+    style: lav ? 'background:var(--lav);border-color:#c9bff0;color:var(--lav-ink)' : '',
+    onclick: () => { S.ad.createFrom = ''; S.ad.createScope = scope; collectionCreate(); } }, label);
+  body.append(...[h('div', { class: 'row between' }, h('h2', { style: 'margin:0' }, '回収メモ一覧'),
+    h('div', { class: 'row' },
+      S.ad.hq ? null : newBtn('', S.ad.admin ? '+ この園の回収メモ' : '+ 新規作成', false),
+      S.ad.admin ? newBtn('ALL', '+ 全園共通の回収メモ', true) : null)),
+    h('div', { class: 'sub', style: 'margin:6px 0 0' }, '健康診断書など、職員からの提出物を「誰が出したか・まだか」で管理します。受け取ったらチェックを入れてください。'),
+    box, listBox].filter(Boolean));
+  if (S.ad.notice) { setMsg(box, h('div', { class: 'ok' }, S.ad.notice)); S.ad.notice = ''; }
+  call('adminGetCollections', S.ad.cred).then(list => {
+    if (!list.length) return listBox.replaceChildren(h('div', { class: 'card sub' }, 'まだ回収メモがありません。上のボタンから作りましょう。'));
+    listBox.replaceChildren(...list.map(c => h('div', { class: 'card' },
+      h('div', {}, c.all ? h('span', { class: 'tag lav' }, '全園共通') : null, audienceTag(c),
+        h('span', { class: 'tag ' + (c.open ? '' : 'warn') }, c.open ? '回収中' : '締め切り済み'),
+        c.open && c.overdue && c.received < c.target ? h('span', { class: 'tag warn' }, '期限切れ') : null),
+      h('h2', { style: 'margin-top:6px' }, c.title),
+      h('div', { class: 'sub' }, (c.all ? '作成: ' : '担当: ') + c.managerName
+        + ' / 対象: ' + (c.all ? (c.audience === 'director' ? '全園の園長' : '全園の全職員') : (c.targetAll ? '全員' : '選択した職員'))
+        + ' / 期限: ' + fmtDate(c.deadline)),
+      h('div', { class: 'prog' }, h('div', { class: 'bar' }, h('i', { style: 'width:' + (c.target ? Math.round(c.received * 100 / c.target) : 0) + '%' })),
+        h('span', {}, c.received + '/' + c.target + '人 回収済み')),
+      c.all ? facilityProgress(c.byFacility) : null,
+      h('div', { class: 'row', style: 'margin-top:10px' },
+        h('button', { class: 'small', onclick: () => collectionDetail(c.collectionId) }, '開いてチェック'),
+        h('button', { class: 'ghost small', onclick: () => collectionShareText(c) }, 'Chatwork用の依頼文'),
+        c.canEdit === false ? null : h('button', { class: 'ghost small', onclick: () => {
+          call('adminSetCollectionStatus', S.ad.cred, c.collectionId, c.status === 'open' ? 'closed' : 'open').then(adminMain).catch(e => setMsg(box, errBox(e.message)));
+        } }, c.status === 'open' ? '締め切る' : '回収を再開'),
+        c.canEdit === false ? null : h('button', { class: 'danger small', onclick: () => {
+          if (!confirm('「' + c.title + '」と、その記録(受取日・メモ)をすべて削除します。元に戻せません。よろしいですか?')) return;
+          call('adminDeleteCollection', S.ad.cred, c.collectionId).then(adminMain).catch(e => setMsg(box, errBox(e.message)));
+        } }, '削除')))));
+  }).catch(e => setMsg(box, errBox(e.message)));
+}
+
+// ---- 回収メモの作成 ----
+function collectionCreate() {
+  S.ad.tab = 'collections';
+  const isAll = !!S.ad.hq || (S.ad.admin && S.ad.createScope === 'ALL');
+  const me = S.ad.admin ? '' : S.ad.cred.staffId;
+  const title = h('input', { type: 'text', maxlength: '100', placeholder: '例: 健康診断書の提出' });
+  const desc = h('textarea', { placeholder: '説明(任意)。例: 原本を事務所の箱に入れてください', style: 'min-height:70px' });
+  const deadline = h('input', { type: 'date' });
+  const audAll = h('input', { type: 'radio', name: 'caud', value: '', checked: true });
+  const audDir = h('input', { type: 'radio', name: 'caud', value: 'director' });
+  const box = h('div');
+  let picks = [], mgrPicks = [];
+  const counter = h('span', { class: 'sub' });
+  const mgrCounter = h('span', { class: 'sub' });
+  const tgtList = h('div', {}, h('div', { class: 'sub' }, '読み込み中…'));
+  const mgrList = h('div', {}, h('div', { class: 'sub' }, '読み込み中…'));
+  const mgrWarn = h('div');
+  function updateCount() { counter.textContent = picks.filter(p => p.cb.checked).length + ' / ' + picks.length + '人を選択中'; }
+  function setAll(v) { picks.forEach(p => { p.cb.checked = v; }); updateCount(); }
+  function meOff() { return !!me && mgrPicks.some(p => p.s.staffId === me && !p.cb.checked); }
+  function updateMgr() {
+    const n = mgrPicks.filter(p => p.cb.checked).length;
+    mgrCounter.textContent = n ? n + '人を選択中' : '選択なし(園長だけがチェックします)';
+    setMsg(mgrWarn, meOff() ? h('div', { class: 'note' }, 'あなた(作成者)を外しています。作成後、あなたはこの回収メモを見たりチェックしたりできなくなります(代理で作成するとき向け)。') : null);
+  }
+  if (!isAll) call('adminGetStaff', S.ad.cred).then(list => {
+    const act = list.filter(s => s.active);
+    // 担当者: 作成者には最初からチェック。代理で作成する場合は外せる
+    mgrPicks = act.map(s => ({ s: s, cb: h('input', { type: 'checkbox', checked: s.staffId === me, onchange: updateMgr }) }));
+    mgrList.replaceChildren(...mgrPicks.map(p => h('label', { class: 'opt' }, p.cb, h('span', {}, p.s.name, p.s.staffId === me ? h('span', { class: 'sub' }, '(あなた・作成者)') : null))));
+    updateMgr();
+    picks = act.map(s => ({ s: s, cb: h('input', { type: 'checkbox', checked: true, onchange: updateCount }) }));
+    if (!picks.length) return tgtList.replaceChildren(h('div', { class: 'err' }, '職員が登録されていません。先に「職員」タブで登録してください。'));
+    tgtList.replaceChildren(...picks.map(p => h('label', { class: 'opt' }, p.cb, h('span', {}, p.s.name))));
+    updateCount();
+  }).catch(e => tgtList.replaceChildren(errBox(e.message)));
+
+  const back = () => (S.ad.createFrom === 'staff' ? staffLoadList : adminMain)();
+  const saveBtn = h('button', { class: 'block' }, '作成する');
+  saveBtn.addEventListener('click', () => {
+    setMsg(box, null);
+    if (!title.value.trim()) return setMsg(box, errBox('タイトルを入力してください。'));
+    if (!isAll && picks.length && !picks.some(p => p.cb.checked)) return setMsg(box, errBox('対象の職員を1人以上選んでください。'));
+    if (meOff() && !confirm('あなた(作成者)が担当者に入っていません。作成後、あなたはこの回収メモを管理できなくなります。このまま作成しますか?')) return;
+    const x = {
+      title: title.value, description: desc.value, deadline: deadline.value,
+      scope: isAll ? 'ALL' : '', audience: isAll && audDir.checked ? 'director' : '',
+      managerIds: isAll ? [] : mgrPicks.filter(p => p.cb.checked).map(p => p.s.staffId),
+      targets: (isAll || (picks.length && picks.every(p => p.cb.checked))) ? 'all' : picks.filter(p => p.cb.checked).map(p => p.s.staffId),
+    };
+    withBusy(saveBtn, call('adminCreateCollection', S.ad.cred, x).then(r => {
+      const info = { collectionId: r.collectionId, title: x.title.trim(), description: x.description.trim(), deadline: x.deadline, audience: x.audience };
+      // 自分を外した職員は、作成後この回収メモを開けない。依頼文だけ出して回答画面に戻れるようにする
+      if (meOff()) {
+        S.st.notice = '「' + info.title + '」を作成しました(担当者ではないため、あなたの管理画面には表示されません)。';
+        return collectionShareText(info, staffLoadList);
+      }
+      S.ad.notice = '「' + info.title + '」を作成しました。';
+      collectionShareText(info, adminMain);
+    }).catch(e => setMsg(box, errBox(e.message))));
+  });
+
+  const targetCard = h('div', { class: 'card' },
+    h('h2', {}, '対象者'),
+    h('div', { class: 'sub' }, '提出してもらう職員を選びます。選ばれた職員の画面に「提出物」として表示されます。'),
+    h('div', { class: 'row', style: 'margin:10px 0' },
+      h('button', { class: 'small', onclick: () => setAll(true) }, '全員を選択'),
+      h('button', { class: 'ghost small', onclick: () => setAll(false) }, '全員を外す'), counter),
+    tgtList);
+  const mgrCard = h('div', { class: 'card' },
+    h('h2', {}, '担当者(受け取ってチェックする人)'),
+    h('div', { class: 'sub' }, '提出物を受け取り、チェックやメモを付けられる職員を選びます。何人でも選べます。園長は、選ばなくても常にチェックできます。'),
+    me ? h('div', { class: 'sub' }, 'あなた(作成者)には最初からチェックが入っています。代理で作成するときは外せます。') : null,
+    h('div', { class: 'row', style: 'margin:10px 0' }, mgrCounter), mgrWarn, mgrList);
+  const allCard = h('div', { class: 'card' },
+    h('h2', {}, '対象者と公開範囲'),
+    h('label', { class: 'opt' }, audAll, h('span', {}, h('b', {}, '全園の全職員'), h('div', { class: 'sub' }, '全園すべての職員が対象です。'))),
+    h('label', { class: 'opt' }, audDir, h('span', {}, h('b', {}, '園長のみ'), h('div', { class: 'sub' }, '各園の「職員」タブで「園長」に設定された人だけが対象です。'))),
+    h('div', { class: 'sub', style: 'margin-top:8px' }, '各園の園長と統括が、全園分の状況を見てチェックできます。締め切り・削除は、作成した人と統括が行えます。'));
+
+  show(h('button', { class: 'ghost small', onclick: back }, '← 戻る'),
+    h('h1', {}, isAll ? '全園共通の回収メモを作成' : '回収メモを作成'),
+    isAll ? h('div', { class: 'tag lav' }, '全園共通') : (S.ad.admin ? h('div', { class: 'sub' }, S.ad.title + 'だけの回収メモです(他の園からは見えません)。') : null),
+    h('div', { class: 'card' },
+      h('label', { class: 'f' }, 'タイトル'), title,
+      h('label', { class: 'f' }, '説明(任意)'), desc,
+      h('label', { class: 'f' }, '提出期限(任意)'), deadline),
+    isAll ? allCard : [targetCard, mgrCard],
+    box, saveBtn);
+}
+
+// ---- 回収メモのチェック画面 ----
+function collectionDetail(collectionId) {
+  S.ad.tab = 'collections';
+  const back = h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る');
+  show(back, h('div', { class: 'sub' }, '読み込み中…'));
+  call('adminGetCollection', S.ad.cred, collectionId).then(d => {
+    const c = d.collection;
+    const people = d.people;
+    const msg = h('div');
+    const prog = h('div');
+    const listBox = h('div');
+    const remindBox = h('div');
+    const onlyPend = h('input', { type: 'checkbox' });
+    S.ad.cview = S.ad.cview || {};
+    let scope = '';   // 全園共通: '' = 全園、それ以外は facilityId
+
+    function scoped() { return scope ? people.filter(p => p.facilityId === scope) : people; }
+    function drawProg() {
+      const list = scoped();
+      const n = list.filter(p => p.receivedAt).length;
+      prog.replaceChildren(h('div', { class: 'prog' }, h('div', { class: 'bar' }, h('i', { style: 'width:' + (list.length ? Math.round(n * 100 / list.length) : 0) + '%' })),
+        h('span', {}, n + '/' + list.length + '人 回収済み')));
+    }
+    function row(p) {
+      const cb = h('input', { type: 'checkbox', checked: !!p.receivedAt });
+      const st = h('span', { class: 'cstat' });
+      const memo = h('input', { type: 'text', class: 'cmemo', maxlength: '200', placeholder: 'ひとことメモ(例: 来週持参、一部のみ)', value: p.memo });
+      const memoMsg = h('span', { class: 'sub cmemo-msg' });
+      const el = h('div', { class: 'crow' },
+        h('label', { class: 'cchk' }, cb, h('span', { class: 'cname' }, p.name)),
+        st, h('div', { class: 'cmemo-wrap' }, memo, memoMsg));
+      function paint() {
+        el.classList.toggle('got', !!p.receivedAt);
+        st.textContent = p.receivedAt ? fmtMDHM(p.receivedAt) + ' 受取(' + p.receivedBy + ')' : '未回収';
+      }
+      cb.addEventListener('change', () => {
+        const want = cb.checked;
+        if (!want && !confirm(p.name + ' さんの「受取済み」を取り消します。よろしいですか?')) { cb.checked = true; return; }
+        cb.disabled = true;
+        call('adminMarkCollection', S.ad.cred, c.collectionId, p.staffId, want).then(m => {
+          p.receivedAt = m.receivedAt; p.receivedBy = m.receivedBy;
+          paint(); drawProg(); drawRemind();
+          if (onlyPend.checked && p.receivedAt) setTimeout(drawList, 600);
+        }).catch(e => { cb.checked = !want; setMsg(msg, errBox(e.message)); })
+          .finally(() => { cb.disabled = false; });
+      });
+      memo.addEventListener('change', () => {
+        memoMsg.textContent = '保存中…';
+        call('adminSetCollectionMemo', S.ad.cred, c.collectionId, p.staffId, memo.value).then(m => {
+          p.memo = m.memo; memoMsg.textContent = '保存しました';
+          setTimeout(() => { if (memoMsg.textContent === '保存しました') memoMsg.textContent = ''; }, 2000);
+        }).catch(e => { memoMsg.textContent = ''; setMsg(msg, errBox(e.message)); });
+      });
+      memo.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) memo.blur(); });
+      paint();
+      return el;
+    }
+    function drawList() {
+      const list = scoped().filter(p => !onlyPend.checked || !p.receivedAt);
+      if (!list.length) return listBox.replaceChildren(h('div', { class: 'sub', style: 'padding:10px 4px' }, onlyPend.checked ? '未回収の人はいません。' : '対象の職員がいません。'));
+      if (c.all && !scope) {
+        // 全園: 園ごとに見出しを付ける
+        listBox.replaceChildren(...d.facilities.map(f => {
+          const fl = list.filter(p => p.facilityId === f.facilityId);
+          return fl.length ? [h('h3', {}, f.name)].concat(fl.map(row)) : null;
+        }).filter(Boolean).flat());
+      } else {
+        listBox.replaceChildren(...list.map(row));
+      }
+    }
+    function drawRemind() {
+      const groups = c.all && !scope ? d.facilities.map(f => ({ name: f.name, list: people.filter(p => p.facilityId === f.facilityId) }))
+        : [{ name: '', list: scoped() }];
+      const lines = groups.map(g => ({ name: g.name, pend: g.list.filter(p => !p.receivedAt).map(p => p.name) }))
+        .filter(g => g.pend.length).map(g => (c.all ? g.name.replace('こども保育園', '') + ': ' : '') + g.pend.join('、'));
+      if (!lines.length) return remindBox.replaceChildren(h('div', { class: 'ok' }, '全員分を回収済みです。'));
+      const text = '【提出のお願い】\n' + c.title + '\n' + (c.deadline ? '提出期限: ' + fmtDate(c.deadline) + '\n' : '')
+        + '\nまだ受け取っていない方がいます。お手数ですが、担当者に提出をお願いします。\n\n未提出:\n' + lines.join('\n');
+      remindBox.replaceChildren(...[h('b', {}, 'Chatwork用の催促文'),
+        c.all && !scope ? h('div', { class: 'sub' }, '上で園を選ぶと、その園の未提出者だけの催促文になります。') : null,
+        copyBox(text, 'コピー')].filter(Boolean));
+    }
+    function csv() {
+      const head = ['名前'].concat(c.all ? ['園'] : [], ['状態', '受取日時', '受取者', 'メモ']);
+      const rows = [head].concat(people.map(p => [p.name].concat(c.all ? [p.facility] : [],
+        [p.receivedAt ? '回収済み' : '未回収', p.receivedAt, p.receivedBy, p.memo])));
+      return rows.map(r => r.map(csvCell).join(',')).join('\r\n');
+    }
+    onlyPend.addEventListener('change', drawList);
+
+    let tabBar = null;
+    if (c.all) {
+      const keys = [['', '全園']].concat(d.facilities.map(f => [f.facilityId, f.name.replace('こども保育園', '')]));
+      const btns = keys.map(k => h('button', { onclick: () => select(k[0]) }, k[1]));
+      tabBar = h('div', { class: 'tabs' }, btns);
+      var select = key => {
+        scope = key;
+        btns.forEach((b, i) => { b.className = keys[i][0] === key ? 'on' : ''; });
+        drawProg(); drawList(); drawRemind();
+      };
+    }
+    const dlMsg = h('span', { class: 'sub' });
+    const fname = (c.title.replace(/[\\/:*?"<>|.\s]+/g, '_').slice(0, 40) || '回収メモ') + '_回収状況.csv';
+    show(back,
+      h('div', { style: 'margin-top:8px' }, c.all ? h('span', { class: 'tag lav' }, '全園共通') : null, audienceTag(c),
+        h('span', { class: 'tag ' + (c.open ? '' : 'warn') }, c.open ? '回収中' : '締め切り済み')),
+      h('h1', {}, c.title),
+      h('div', { class: 'sub' }, '提出期限: ' + fmtDate(c.deadline)),
+      c.description ? h('div', { class: 'sub', style: 'white-space:pre-wrap' }, c.description) : null,
+      tabBar,
+      h('div', { class: 'card' },
+        prog,
+        h('div', { class: 'row between', style: 'margin-top:10px' },
+          h('label', { style: 'font-size:14px' }, onlyPend, ' 未回収の人だけ表示'),
+          h('span', { class: 'sub' }, '受け取ったらチェック。メモは入力して枠の外を押すと保存されます。')),
+        msg, listBox),
+      h('div', { class: 'card' }, remindBox),
+      h('div', { class: 'card' }, h('div', { class: 'row' },
+        h('button', { class: 'small', onclick: () => {
+          try { downloadCsv(fname, csv()); dlMsg.textContent = 'ダウンロードしました(' + fname + ')'; }
+          catch (e) { dlMsg.textContent = 'ダウンロードできませんでした。'; }
+        } }, 'CSVをダウンロード'), dlMsg)));
+    if (c.all) select(''); else { drawProg(); drawList(); drawRemind(); }
+  }).catch(e => show(back, errBox(e.message)));
 }
 
 // 公開後に設問ごとの表示・非表示を切り替える(データは消さない)
