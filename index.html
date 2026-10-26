@@ -72,6 +72,7 @@
   .srow { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding:10px 0; border-top:1px solid var(--line); }
   .srow-main { flex:1; min-width:0; }
   .srow-st { white-space:nowrap; margin-top:2px; }
+  .srow-side { display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
   .crow { display:grid; grid-template-columns:1fr auto; gap:4px 10px; align-items:center; padding:10px 6px; border-bottom:1px solid var(--line); }
   .crow.got { background:#f6faf8; }
   .cchk { display:flex; align-items:center; gap:10px; cursor:pointer; min-width:0; }
@@ -1199,17 +1200,33 @@ function fmtMDHM(t) {
 function staffCollectionsCard() {
   const list = S.st.collections || [];
   if (!list.length) return null;
-  return h('div', { class: 'card' },
+  const rows = {};
+  const card = h('div', { class: 'card' },
     h('h2', {}, '提出物'),
     h('div', { class: 'sub' }, '担当者が受け取ると「受取済み」になります。'),
-    list.map(c => h('div', { class: 'srow' },
+    list.map(c => (rows[c.collectionId] = h('div', { class: 'srow' },
       h('div', { class: 'srow-main' },
         h('div', {}, c.allOrg ? h('span', { class: 'tag lav' }, '全園共通') : null, h('b', {}, c.title)),
         c.deadline ? h('div', { class: 'sub' }, '提出期限 ' + fmtDate(c.deadline)) : null,
         c.description ? h('div', { class: 'sub', style: 'white-space:pre-wrap' }, c.description) : null),
-      c.receivedAt
-        ? h('span', { class: 'tag gray srow-st' }, fmtMD(c.receivedAt) + ' 受取済み')
-        : h('span', { class: 'tag warn srow-st' }, '未提出'))));
+      h('div', { class: 'srow-side' },
+        c.receivedAt
+          ? h('span', { class: 'tag gray srow-st' }, fmtMD(c.receivedAt) + ' 受取済み')
+          : h('span', { class: 'tag warn srow-st' }, '未提出'))))));
+  // 自分が担当者の回収メモには、その場からチェック画面へ行けるボタンを付ける
+  if (S.st.managedCollections > 0) {
+    call('adminGetCollections', { staffId: S.st.staffId, pin: S.st.pin }).then(mine => {
+      mine.forEach(m => {
+        const r = rows[m.collectionId];
+        if (r) r.querySelector('.srow-side').append(h('button', { class: 'small', onclick: () => openCollectionCheck(m.collectionId) }, 'チェックする'));
+      });
+    }).catch(() => {});
+  }
+  return card;
+}
+// 職員(担当者)が回答画面から回収メモのチェック画面を開く
+function openCollectionCheck(collectionId) {
+  staffAdminCtx(); S.ad.tab = 'collections'; collectionDetail(collectionId);
 }
 
 // 職員の「+ 新規作成」: アンケートか回収メモかを選ぶ
