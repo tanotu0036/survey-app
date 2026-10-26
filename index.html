@@ -142,13 +142,15 @@
 // ====== 版番号 ======
 // 画面(この index.html)を修正したら、ここの番号を上げて、下の更新履歴に1行足す。
 // 番号は「年.月.日-その日の何回目か」。GAS側の版番号(コード.gs の GAS_VERSION)とは別に数える。
-const APP_VERSION = '2026.10.26-2';
+const APP_VERSION = '2026.10.26-3';
 // 更新履歴(画面)
 //  2026.10.26-1  版番号の表示を追加。回収メモ(提出物の回収管理)を追加。回収済みの人を下へ並べる、
 //                チェックした瞬間に色を変える、提出物の欄は未提出のものだけ表示、担当している回収メモのカード。
 //                アンケートの管理者・回収メモの担当者から、作成者を外せるようにした(代理作成)。
 //  2026.10.26-2  ログイン後の画面は終わっていないものだけ表示(担当しているものも未回答・未回収があるものだけ)。
 //                担当の管理ボタンを「+ 新規作成」の横に戻した。
+//  2026.10.26-3  ログイン後の画面から「担当しているもの」のカードをなくした(自分の未回答・未提出だけを表示)。
+//                担当の仕事は「自分が担当している管理」ボタンから開く。
 
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzArLDP5bk6o9l0yoN1SCvu0aT69dIKvM-hYlCTYMHhZDgvWSfpCr2Ez9cNekm0DHNP/exec';
 
@@ -499,7 +501,7 @@ function staffList() {
       (S.st.managed + S.st.managedCollections) > 0 ? h('button', { class: 'ghost', onclick: openManage }, '自分が担当している管理('
         + [S.st.managed ? 'アンケート' + S.st.managed : '', S.st.managedCollections ? '回収メモ' + S.st.managedCollections : ''].filter(Boolean).join('・') + ')') : null),
     S.st.notice ? h('div', { class: 'note' }, S.st.notice) : null,
-    // ここに出すのは「まだ終わっていないもの」だけ(回答待ちのアンケート、未提出の提出物、担当していて未回答・未回収の人がいるもの)
+    // ここに出すのは自分がまだやっていないことだけ(回答待ちのアンケート、未提出の提出物)
     list.map(v => h('div', { class: 'card' },
           h('div', {}, v.allOrg ? h('span', { class: 'tag lav' }, '全園共通') : null, audienceTag(v),
             h('span', { class: 'tag' + (v.anonymous ? '' : ' gray') }, v.anonymous ? '無記名' : '記名'),
@@ -1210,8 +1212,8 @@ function fmtMDHM(t) {
 }
 
 // 職員の一覧画面に出す「提出物」(自分の状況だけ。他の職員の状況やメモは届かない)
-// ログイン後の画面の「提出物」と「担当しているもの」。どちらも終わっていないものだけを出す。
-// 何も残っていなければ「対応が必要なものはありません」を出す(surveyCount: 回答待ちアンケートの件数)
+// ログイン後の画面の「提出物」。まだ受け取ってもらっていないものだけを出す。
+// 回答待ちのアンケートも提出物もなければ「対応が必要なものはありません」を出す(surveyCount: 回答待ちアンケートの件数)
 function staffTodoCards(surveyCount) {
   // 提出物: まだ受け取ってもらっていないものだけ(受け取られたら消える)
   const pend = (S.st.collections || []).filter(c => !c.receivedAt);
@@ -1224,35 +1226,12 @@ function staffTodoCards(surveyCount) {
         c.deadline ? h('div', { class: 'sub' }, '提出期限 ' + fmtDate(c.deadline)) : null,
         c.description ? h('div', { class: 'sub', style: 'white-space:pre-wrap' }, c.description) : null),
       h('span', { class: 'tag warn srow-st' }, '未提出')))) : null;
-  const emptyCard = h('div', { class: 'card center' }, h('h2', {}, '対応が必要なものはありません'), h('div', { class: 'sub' }, '画面を閉じて大丈夫です。'));
-  const nothingYet = !surveyCount && !pend.length;
-  // 担当しているもの: 受付中で、まだ未回答・未回収の人がいるものだけ
-  const mgrSlot = h('div', {}, nothingYet && !(S.st.managed + S.st.managedCollections) ? emptyCard : null);
-  if (S.st.managed + S.st.managedCollections > 0) {
-    const cred = { staffId: S.st.staffId, pin: S.st.pin };
-    Promise.all([
-      S.st.managed ? call('adminGetSurveys', cred).catch(() => []) : [],
-      S.st.managedCollections ? call('adminGetCollections', cred).catch(() => []) : [],
-    ]).then(([svs, cols]) => {
-      const sv = svs.filter(v => v.open && v.completedActive < v.target);
-      const co = cols.filter(c => c.open && c.received < c.target);
-      if (!sv.length && !co.length) { if (nothingYet) mgrSlot.replaceChildren(emptyCard); return; }
-      mgrSlot.replaceChildren(h('div', { class: 'card' },
-        h('h2', {}, '担当しているもの'),
-        h('div', { class: 'sub' }, 'まだ終わっていないものです。全員の回答・回収が終わると、ここから消えます。'),
-        sv.map(v => h('div', { class: 'srow' },
-          h('div', { class: 'srow-main' },
-            h('div', {}, h('span', { class: 'tag gray' }, 'アンケート'), h('b', {}, v.title)),
-            h('div', { class: 'sub' }, v.completedActive + '/' + v.target + '人 回答済み' + (v.deadline ? ' ・ 期限 ' + fmtDate(v.deadline) : ''))),
-          h('button', { class: 'small', onclick: () => { staffAdminCtx(); adminResults(v.surveyId); } }, '回答状況を見る'))),
-        co.map(m => h('div', { class: 'srow' },
-          h('div', { class: 'srow-main' },
-            h('div', {}, h('span', { class: 'tag', style: 'background:var(--peach);color:var(--peach-ink)' }, '回収メモ'), m.all ? h('span', { class: 'tag lav' }, '全園共通') : null, h('b', {}, m.title)),
-            h('div', { class: 'sub' }, m.received + '/' + m.target + '人 回収済み' + (m.deadline ? ' ・ 期限 ' + fmtDate(m.deadline) : ''))),
-          h('button', { class: 'small', onclick: () => openCollectionCheck(m.collectionId) }, 'チェックする')))));
-    });
-  }
-  return h('div', {}, pendCard, mgrSlot);
+  // 担当している仕事(進み具合・チェック・締め切りなど)は、上の「自分が担当している管理」ボタンから開く。
+  // ここには自分がまだやっていないこと(未回答・未提出)だけを出す
+  const emptyCard = !surveyCount && !pend.length
+    ? h('div', { class: 'card center' }, h('h2', {}, '対応が必要なものはありません'), h('div', { class: 'sub' }, '画面を閉じて大丈夫です。'))
+    : null;
+  return h('div', {}, pendCard, emptyCard);
 }
 
 // 職員(担当者)が回答画面から回収メモのチェック画面を開く
