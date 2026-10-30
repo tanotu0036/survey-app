@@ -86,6 +86,8 @@
   .cmemo-wrap { grid-column:1 / -1; display:flex; align-items:center; gap:8px; }
   .cmemo { flex:1; padding:7px 10px !important; font-size:14px !important; }
   .cmemo-msg { white-space:nowrap; }
+  .atabs { margin:12px 0 0; }
+  .atabs button.on { background:var(--lav); color:var(--lav-ink); border-color:#c9bff0; }
   .cdiv { font-size:12px; font-weight:600; color:var(--sub); padding:12px 6px 4px; border-bottom:1px solid var(--line); }
   /* 職員の一覧の回答状況(H案) */
   .pills { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
@@ -142,7 +144,7 @@
 // ====== 版番号 ======
 // 画面(この index.html)を修正したら、ここの番号を上げて、下の更新履歴に1行足す。
 // 番号は「年.月.日-その日の何回目か」。GAS側の版番号(コード.gs の GAS_VERSION)とは別に数える。
-const APP_VERSION = '2026.10.26-3';
+const APP_VERSION = '2026.10.30-1';
 // 更新履歴(画面)
 //  2026.10.26-1  版番号の表示を追加。回収メモ(提出物の回収管理)を追加。回収済みの人を下へ並べる、
 //                チェックした瞬間に色を変える、提出物の欄は未提出のものだけ表示、担当している回収メモのカード。
@@ -151,6 +153,7 @@ const APP_VERSION = '2026.10.26-3';
 //                担当の管理ボタンを「+ 新規作成」の横に戻した。
 //  2026.10.26-3  ログイン後の画面から「担当しているもの」のカードをなくした(自分の未回答・未提出だけを表示)。
 //                担当の仕事は「自分が担当している管理」ボタンから開く。
+//  2026.10.30-1  アンケート・回収メモの一覧を「現行」と「アーカイブ」(締め切り・期限切れ)に分けた。
 
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzArLDP5bk6o9l0yoN1SCvu0aT69dIKvM-hYlCTYMHhZDgvWSfpCr2Ez9cNekm0DHNP/exec';
 
@@ -863,7 +866,8 @@ function adminSurveys(body) {
   if (S.ad.notice) { setMsg(box, h('div', { class: 'ok' }, S.ad.notice)); S.ad.notice = ''; }
   call('adminGetSurveys', S.ad.cred).then(list => {
     if (!list.length) return listBox.replaceChildren(h('div', { class: 'card sub' }, 'まだアンケートがありません。上のボタンから作りましょう。'));
-    listBox.replaceChildren(...list.map(v => h('div', { class: 'card' },
+    // 受付終了(締め切った・期限が過ぎた)ものはアーカイブへ
+    archiveTabs(listBox, list, v => !v.open, 'surveys', v => h('div', { class: 'card' },
       h('div', {}, v.all ? h('span', { class: 'tag lav' }, '全園共通') : null, audienceTag(v),
         h('span', { class: 'tag' + (v.anonymous ? '' : ' gray') }, v.anonymous ? '無記名' : '記名'),
         h('span', { class: 'tag ' + (v.open ? '' : 'warn') }, v.open ? '受付中' : '受付終了')),
@@ -884,8 +888,34 @@ function adminSurveys(body) {
         v.canEdit === false ? null : h('button', { class: 'danger small', onclick: () => {
           if (!confirm('「' + v.title + '」と、その回答をすべて削除します。元に戻せません。よろしいですか?')) return;
           call('adminDeleteSurvey', S.ad.cred, v.surveyId).then(adminMain).catch(e => setMsg(box, errBox(e.message)));
-        } }, '削除')))));
+        } }, '削除'))));
   }).catch(e => setMsg(box, errBox(e.message)));
+}
+
+// 一覧を「現行」と「アーカイブ」に分けて表示する。
+// isArch: アーカイブに入れるか / key: どの一覧か(選んだ側をログアウトまで覚えておく) / card: 1件分のカードを作る
+function archiveTabs(listBox, list, isArch, key, card) {
+  S.ad.arch = S.ad.arch || {};
+  const cur = list.filter(x => !isArch(x)), arc = list.filter(isArch);
+  const label = key === 'surveys' ? 'アンケート' : '回収メモ';
+  const btnCur = h('button', { class: 'small' }), btnArc = h('button', { class: 'small' });
+  const body = h('div');
+  function draw() {
+    const a = !!S.ad.arch[key];
+    btnCur.className = 'small ' + (a ? 'ghost' : 'on');
+    btnArc.className = 'small ' + (a ? 'on' : 'ghost');
+    btnCur.textContent = '現行(' + cur.length + ')';
+    btnArc.textContent = 'アーカイブ(' + arc.length + ')';
+    const items = a ? arc : cur;
+    body.replaceChildren(...(items.length ? items.map(card) : [h('div', { class: 'card sub' }, a
+      ? 'アーカイブはありません。締め切った' + label + 'や、期限が過ぎた' + label + 'がここに入ります。'
+      : '受付中の' + label + 'はありません。' + (arc.length ? '終わったものは「アーカイブ」にあります。' : '上のボタンから作りましょう。'))]));
+  }
+  btnCur.addEventListener('click', () => { S.ad.arch[key] = false; draw(); });
+  btnArc.addEventListener('click', () => { S.ad.arch[key] = true; draw(); });
+  draw();
+  listBox.replaceChildren(h('div', { class: 'row atabs' }, btnCur, btnArc,
+    h('span', { class: 'sub' }, key === 'surveys' ? '締め切り・回答期限を過ぎたものはアーカイブへ移ります' : '締め切り・提出期限を過ぎたものはアーカイブへ移ります')), body);
 }
 
 // 依頼文・催促文に付ける注意書き(回答途中の下書きは送信するまで端末に残るため)
@@ -1277,10 +1307,12 @@ function adminCollections(body) {
   if (S.ad.notice) { setMsg(box, h('div', { class: 'ok' }, S.ad.notice)); S.ad.notice = ''; }
   call('adminGetCollections', S.ad.cred).then(list => {
     if (!list.length) return listBox.replaceChildren(h('div', { class: 'card sub' }, 'まだ回収メモがありません。上のボタンから作りましょう。'));
-    listBox.replaceChildren(...list.map(c => h('div', { class: 'card' },
+    // 締め切った・提出期限が過ぎたものはアーカイブへ(アーカイブからも開いてチェックできる)
+    archiveTabs(listBox, list, c => !c.open || c.overdue, 'collections', c => h('div', { class: 'card' },
       h('div', {}, c.all ? h('span', { class: 'tag lav' }, '全園共通') : null, audienceTag(c),
-        h('span', { class: 'tag ' + (c.open ? '' : 'warn') }, c.open ? '回収中' : '締め切り済み'),
-        c.open && c.overdue && c.received < c.target ? h('span', { class: 'tag warn' }, '期限切れ') : null),
+        c.open && c.overdue ? h('span', { class: 'tag warn' }, '期限切れ')
+          : h('span', { class: 'tag ' + (c.open ? '' : 'warn') }, c.open ? '回収中' : '締め切り済み'),
+        c.received < c.target && (!c.open || c.overdue) ? h('span', { class: 'tag warn' }, '未回収あり') : null),
       h('h2', { style: 'margin-top:6px' }, c.title),
       h('div', { class: 'sub' }, (c.all ? '作成: ' : '担当: ') + c.managerName
         + ' / 対象: ' + (c.all ? (c.audience === 'director' ? '全園の園長' : '全園の全職員') : (c.targetAll ? '全員' : '選択した職員'))
@@ -1297,7 +1329,7 @@ function adminCollections(body) {
         c.canEdit === false ? null : h('button', { class: 'danger small', onclick: () => {
           if (!confirm('「' + c.title + '」と、その記録(受取日・メモ)をすべて削除します。元に戻せません。よろしいですか?')) return;
           call('adminDeleteCollection', S.ad.cred, c.collectionId).then(adminMain).catch(e => setMsg(box, errBox(e.message)));
-        } }, '削除')))));
+        } }, '削除'))));
   }).catch(e => setMsg(box, errBox(e.message)));
 }
 
