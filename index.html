@@ -181,7 +181,7 @@
 // ====== 版番号 ======
 // 画面(この index.html)を修正したら、ここの番号を上げて、下の更新履歴に1行足す。
 // 番号は「年.月.日-その日の何回目か」。GAS側の版番号(コード.gs の GAS_VERSION)とは別に数える。
-const APP_VERSION = '2026.11.04-7';
+const APP_VERSION = '2026.11.04-8';
 // 更新履歴(画面)
 //  2026.10.26-1  版番号の表示を追加。回収メモ(提出物の回収管理)を追加。回収済みの人を下へ並べる、
 //                チェックした瞬間に色を変える、提出物の欄は未提出のものだけ表示、担当している回収メモのカード。
@@ -202,6 +202,8 @@ const APP_VERSION = '2026.11.04-7';
 //  2026.11.04-5  ログイン後のシフト希望のボタンを「シフト希望を作成する」に(入力画面の「提出する」で送る)。
 //  2026.11.04-6  Excel用のコピーに「その他希望・連絡」の列を入れられるようにした(1日の左。シフト表のD列「希望」に合わせる)。
 //  2026.11.04-7  行の並べ替えで空行(産休中の先生の行・区切りの行など)を追加できるようにした。コピーでは記号のない行になる(GAS 2026.11.04-3 が必要)。
+//  2026.11.04-8  シフト希望の対象の職員を作成・修正の画面で選べるようにした。行の並べ替えで「欄外へ」(この月は対象外)にもできる
+//                (対象外の人には提出のお願いを出さず、未提出の数・コピーにも入れない。GAS 2026.11.04-4 が必要)。
 
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzArLDP5bk6o9l0yoN1SCvu0aT69dIKvM-hYlCTYMHhZDgvWSfpCr2Ez9cNekm0DHNP/exec';
 
@@ -1883,6 +1885,20 @@ function shiftCreate(edit) {
   deadline.addEventListener('input', () => { deadlineTouched = true; });
   const box = h('div');
 
+  // ---- 対象の職員(休業中などで今月は出さない人のチェックを外す) ----
+  // 初期値: 修正はそのシフト希望の対象外、新規は前回のシフト希望の対象外を外した状態
+  const exInit = new Set((tpl && tpl.exclude) || []);
+  let tgtPicks = [];
+  const tgtCount = h('span', { class: 'sub' });
+  const tgtList = h('div', {}, h('div', { class: 'sub' }, '読み込み中…'));
+  const updTgt = () => { tgtCount.textContent = tgtPicks.filter(p => p.cb.checked).length + ' / ' + tgtPicks.length + '人を対象にしています'; };
+  call('adminGetStaff', S.ad.cred).then(list => {
+    tgtPicks = list.filter(s => s.active).map(s => ({ s: s, cb: h('input', { type: 'checkbox', checked: !exInit.has(s.staffId), onchange: updTgt }) }));
+    tgtList.replaceChildren(...(tgtPicks.length ? tgtPicks.map(p => h('label', { class: 'opt' }, p.cb, h('span', {}, p.s.name)))
+      : [h('div', { class: 'err' }, '職員が登録されていません。先に「職員」タブで登録してください。')]));
+    updTgt();
+  }).catch(e => tgtList.replaceChildren(errBox(e.message)));
+
   // ---- 選択肢(ボタンの文字・Excelに入れる記号・色) ----
   const optBox = h('div');
   const opts = [];
@@ -1978,6 +1994,9 @@ function shiftCreate(edit) {
       days: days.map(d => ({ d: d.d, closed: !!d.closed, note: String(d.note || '').trim() })),
       options: opts.map(o => ({ id: o.id, label: o.label.value.trim(), code: o.code.value.trim(), color: o.color.value })).filter(o => o.label),
     };
+    // 職員の一覧が読めたときだけ送る(読めなかったら、GAS側で前の月と同じ対象外にする)
+    if (tgtPicks.length) x.exclude = tgtPicks.filter(p => !p.cb.checked).map(p => p.s.staffId);
+    if (tgtPicks.length && !tgtPicks.some(p => p.cb.checked)) return setMsg(box, errBox('対象の職員を1人以上選んでください。'));
     if (!x.title.trim()) return setMsg(box, errBox('タイトルを入力してください。'));
     if (!x.options.length) return setMsg(box, errBox('選択肢を1つ以上入れてください。'));
     if (!edit && (S.ad.shiftList || []).some(s => s.month === x.month)
@@ -1999,6 +2018,12 @@ function shiftCreate(edit) {
       h('label', { class: 'f' }, '提出期限(この日の終わりまで提出・修正できます)'), deadline,
       h('label', { class: 'f' }, '説明・ルール(職員の提出画面の上に出ます)'), desc),
     h('div', { class: 'card' },
+      h('h2', {}, '対象の職員'),
+      h('div', { class: 'sub' }, '休業中などで、この月のシフト希望を出さない人のチェックを外してください。外した人には提出のお願いが出ず、未提出の数やExcel用のコピーにも入りません(前の月で外した人は、最初から外れています)。'),
+      h('div', { class: 'row', style: 'margin:10px 0' },
+        h('button', { class: 'small', type: 'button', onclick: () => { tgtPicks.forEach(p => { p.cb.checked = true; }); updTgt(); } }, '全員を選択'), tgtCount),
+      tgtList),
+    h('div', { class: 'card' },
       h('h2', {}, '選択肢'),
       h('div', { class: 'sub' }, '左から、職員の画面のボタンの文字、Excelのシフト表に入れる記号(空ならボタンの文字をそのまま入れます)、色です。色は職員のボタンと集計の表で使います。'),
       edit ? h('div', { class: 'sub' }, 'すでに選んで提出した人がいる選択肢は消せません(文字や記号は変えられます)。') : null,
@@ -2012,7 +2037,8 @@ function shiftCreate(edit) {
 }
 
 // ---- 園長: 集計(Excelのシフト表に貼り付け・行の並べ替え・未提出者) ----
-function shiftDetail(shiftId) {
+// notice: 読み直したあとに出すお知らせ(並べ替えで欄外を変えたときなど)
+function shiftDetail(shiftId, notice) {
   S.ad.tab = 'shifts';
   const back = h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る');
   show(back, h('div', { class: 'sub' }, '読み込み中…'));
@@ -2038,6 +2064,7 @@ function shiftDetail(shiftId) {
     const optById = {};
     sh.options.forEach(o => { optById[o.id] = o; });
     const msg = h('div');
+    if (notice) setMsg(msg, h('div', { class: 'ok' }, notice));
     const withName = h('input', { type: 'checkbox' });
     // その他希望・連絡を、1日の左の列(Excelのシフト表ではD列「希望」)に入れる
     const withNote = h('input', { type: 'checkbox', checked: true });
@@ -2133,6 +2160,21 @@ function shiftDetail(shiftId) {
     function openSort() {
       // 空行の名前はこの画面で直すので、行を写して使う(「やめる」を押したら元のまま)
       const order = rows.map(p => p.blank ? Object.assign({}, p) : p);
+      // 欄外(この月は対象外): 休業中の先生など。提出のお願いを出さず、集計・コピーにも入れない
+      const out = (d.excluded || []).slice();
+      const outBox = h('div');
+      function drawOut() {
+        outBox.replaceChildren(h('div', { class: 'cdiv', style: 'margin-top:12px' }, '欄外(この月は対象外) ' + out.length + '人'),
+          ...(out.length ? out.map((p, i) => h('div', { class: 'sortrow', style: 'cursor:default;color:#8b88a0' },
+            h('span', { class: 'sortname' }, p.name),
+            h('button', { class: 'ghost small', onclick: () => {
+              out.splice(i, 1);
+              // 戻した人は一番下に入る(必要ならドラッグで動かす)
+              order.push(people.find(x => x.staffId === p.staffId) || { staffId: p.staffId, name: p.name, submittedAt: '', choices: {}, note: '' });
+              draw(); drawOut();
+            } }, '戻す')))
+            : [h('div', { class: 'sub', style: 'padding:6px 4px' }, 'いません。休業中などで今月は対象外にする人は、上の「欄外へ」を押してください。')]));
+      }
       const wrap = h('div');
       const save = h('button', { class: 'small' }, 'この順番で保存');
       function move(i, dd) {
@@ -2152,7 +2194,8 @@ function shiftDetail(shiftId) {
             h('span', { class: 'grip', 'aria-hidden': 'true' }, '⠿'),
             h('span', { class: 'sortno' }, String(i + 1)),
             name,
-            p.blank ? h('button', { class: 'danger small', onclick: () => { order.splice(i, 1); draw(); }, 'aria-label': '空行を消す' }, '×') : null,
+            p.blank ? h('button', { class: 'danger small', onclick: () => { order.splice(i, 1); draw(); }, 'aria-label': '空行を消す' }, '×')
+              : h('button', { class: 'ghost small', onclick: () => { order.splice(i, 1); out.push({ staffId: p.staffId, name: p.name }); draw(); drawOut(); } }, '欄外へ'),
             h('button', { class: 'ghost small', disabled: i === 0, onclick: () => move(i, -1), 'aria-label': '上へ' }, '▲'),
             h('button', { class: 'ghost small', disabled: i === order.length - 1, onclick: () => move(i, 1), 'aria-label': '下へ' }, '▼'));
           row.dataset.id = rowKey(p);
@@ -2171,20 +2214,25 @@ function shiftDetail(shiftId) {
         if (inputs.length) inputs[inputs.length - 1].focus();
       } }, '+ 空行を追加');
       save.addEventListener('click', () => {
-        withBusy(save, call('adminSetShiftOrder', S.ad.cred, sh.shiftId, order.map(p => p.blank ? { b: p.label.trim() } : p.staffId)).then(() => {
+        withBusy(save, call('adminSetShiftOrder', S.ad.cred, sh.shiftId, order.map(p => p.blank ? { b: p.label.trim() } : p.staffId), out.map(p => p.staffId)).then(() => {
+          // 欄外を変えたときは、未提出の人数などが変わるので読み直す
+          const before = (d.excluded || []).map(p => p.staffId).sort().join(), after = out.map(p => p.staffId).sort().join();
+          if (before !== after) return shiftDetail(sh.shiftId, '行の並び順と欄外(対象外)を保存しました。次に作るシフト希望も、この並びと対象外を引き継ぎます。');
           rows = order;
           sortBox.replaceChildren();
           setMsg(msg, h('div', { class: 'ok' }, '行の並び順を保存しました。次に作るシフト希望も、この並びを引き継ぎます。'));
           drawTable(); setMsg(copyMsg, null);
         }).catch(e => setMsg(msg, errBox(e.message))));
       });
-      draw();
+      draw(); drawOut();
       sortBox.replaceChildren(h('div', { class: 'card' },
         h('h2', {}, '行の並べ替え'),
         h('div', { class: 'sub', style: 'margin-bottom:8px' }, 'Excelのシフト表の行と同じ順に並べてください。名前をドラッグして動かします(スマホは左の ⠿ をつかみます。▲▼でも動かせます)。この並びは、このシフト希望だけのものです(職員一覧の並びは変わりません)。'),
         h('div', { class: 'sub', style: 'margin-bottom:8px' }, '産休中の先生の行や区切りの行など、Excelにあってアプリにいない行は「+ 空行を追加」で入れてください。空行は記号のない行としてコピーされます。'),
+        h('div', { class: 'sub', style: 'margin-bottom:8px' }, '休業中などでこの月は対象外にする人は「欄外へ」を押します。提出のお願いが出なくなり、未提出の数やコピーにも入りません。Excelにその人の行があるときは、同じ位置に空行を入れてください。'),
         wrap,
         h('div', { style: 'margin-top:8px' }, addBlank),
+        outBox,
         h('div', { class: 'row', style: 'margin-top:10px' }, save, h('button', { class: 'ghost small', onclick: () => sortBox.replaceChildren() }, 'やめる'))));
       sortBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
