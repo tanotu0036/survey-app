@@ -178,7 +178,7 @@
 // ====== 版番号 ======
 // 画面(この index.html)を修正したら、ここの番号を上げて、下の更新履歴に1行足す。
 // 番号は「年.月.日-その日の何回目か」。GAS側の版番号(コード.gs の GAS_VERSION)とは別に数える。
-const APP_VERSION = '2026.11.04-2';
+const APP_VERSION = '2026.11.04-3';
 // 更新履歴(画面)
 //  2026.10.26-1  版番号の表示を追加。回収メモ(提出物の回収管理)を追加。回収済みの人を下へ並べる、
 //                チェックした瞬間に色を変える、提出物の欄は未提出のものだけ表示、担当している回収メモのカード。
@@ -192,8 +192,9 @@ const APP_VERSION = '2026.11.04-2';
 //                集計はExcelのシフト表に貼り付けられる形でコピー。行の並び順はシフト希望ごとにドラッグで変えられる)。
 //                選択肢ごとに色を付け、集計の表に1人ずつの日数(有給○日など)と全員の合計を出す。
 //                休園日の行はピンクにする。
-//  2026.11.04-2  年末年始の休園日を期間で指定(初期値 12/29〜12/31・1/1〜1/3。変えた期間は端末で覚える)。
+//  2026.11.04-2  年末年始の休園日を期間で指定(初期値 12/29〜12/31・1/1〜1/3)。
 //                12月・1月を新しく作るときは最初から休園日にする。
+//  2026.11.04-3  年末年始の期間を覚えるのをやめた(暦で毎年前後するので、毎回 12/29〜12/31・1/1〜1/3 から始める)。
 
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzArLDP5bk6o9l0yoN1SCvu0aT69dIKvM-hYlCTYMHhZDgvWSfpCr2Ez9cNekm0DHNP/exec';
 
@@ -1917,10 +1918,9 @@ function shiftCreate(edit) {
     if (!deadlineTouched) { const p = new Date(y, m - 2, 10); deadline.value = p.getFullYear() + '-' + pad(p.getMonth() + 1) + '-' + pad(p.getDate()); }
   }
   // ---- 年末年始の休園日(12月・1月のときだけ出す) ----
-  // 期間の初期値は 年末 12/29〜12/31、年始 1/1〜1/3。変えた期間はこの端末で覚えておき、次の年も使う
+  // 期間は毎回 年末 12/29〜12/31、年始 1/1〜1/3 から始める(暦によって毎年前後するので、変えた期間は覚えない)
   const NY_NOTE = '年末年始';
-  let ny = { endFrom: 29, endTo: 31, startFrom: 1, startTo: 3 };
-  try { ny = Object.assign(ny, JSON.parse(lsGet('shiftNyRange') || '{}')); } catch (e) {}
+  const ny = { endFrom: 29, endTo: 31, startFrom: 1, startTo: 3 };
   const daySel = v => { const s = h('select', { style: 'width:auto;padding:6px 8px;font-size:14px' }); for (let i = 1; i <= 31; i++) s.append(h('option', { value: String(i) }, i + '日')); s.value = String(v); return s; };
   const nyFrom = daySel(1), nyTo = daySel(1);
   const nyLabel = h('b', { style: 'font-size:14px' });
@@ -1950,7 +1950,6 @@ function shiftCreate(edit) {
   function onNyChange() {
     if (isEnd()) { ny.endFrom = Number(nyFrom.value); ny.endTo = Number(nyTo.value); }
     else { ny.startFrom = Number(nyFrom.value); ny.startTo = Number(nyTo.value); }
-    lsSet('shiftNyRange', JSON.stringify(ny));
     applyNy();
   }
   nyFrom.addEventListener('change', onNyChange); nyTo.addEventListener('change', onNyChange);
