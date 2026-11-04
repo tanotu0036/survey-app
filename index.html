@@ -178,7 +178,7 @@
 // ====== 版番号 ======
 // 画面(この index.html)を修正したら、ここの番号を上げて、下の更新履歴に1行足す。
 // 番号は「年.月.日-その日の何回目か」。GAS側の版番号(コード.gs の GAS_VERSION)とは別に数える。
-const APP_VERSION = '2026.11.04-5';
+const APP_VERSION = '2026.11.04-6';
 // 更新履歴(画面)
 //  2026.10.26-1  版番号の表示を追加。回収メモ(提出物の回収管理)を追加。回収済みの人を下へ並べる、
 //                チェックした瞬間に色を変える、提出物の欄は未提出のものだけ表示、担当している回収メモのカード。
@@ -197,6 +197,7 @@ const APP_VERSION = '2026.11.04-5';
 //  2026.11.04-3  年末年始の期間を覚えるのをやめた(暦で毎年前後するので、毎回 12/29〜12/31・1/1〜1/3 から始める)。
 //  2026.11.04-4  シフト希望の作成画面で、行事の入力欄の例(「行事など(例: 秋の遠足)」)を消した。
 //  2026.11.04-5  ログイン後のシフト希望のボタンを「シフト希望を作成する」に(入力画面の「提出する」で送る)。
+//  2026.11.04-6  Excel用のコピーに「その他希望・連絡」の列を入れられるようにした(1日の左。シフト表のD列「希望」に合わせる)。
 
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzArLDP5bk6o9l0yoN1SCvu0aT69dIKvM-hYlCTYMHhZDgvWSfpCr2Ez9cNekm0DHNP/exec';
 
@@ -2018,6 +2019,8 @@ function shiftDetail(shiftId) {
     sh.options.forEach(o => { optById[o.id] = o; });
     const msg = h('div');
     const withName = h('input', { type: 'checkbox' });
+    // その他希望・連絡を、1日の左の列(Excelのシフト表ではD列「希望」)に入れる
+    const withNote = h('input', { type: 'checkbox', checked: true });
     const fillClosed = h('input', { type: 'checkbox', checked: true });
     const tblBox = h('div', { class: 'stbl' });
     const copyMsg = h('div', { class: 'sub', style: 'margin-top:6px' });
@@ -2063,9 +2066,15 @@ function shiftDetail(shiftId) {
     }
     const totalBox = h('div', { class: 'sub', style: 'margin-top:10px' });
     // Excelに貼る形(タブ区切り)。行は並び順どおり、列は1日〜末日
+    // 列の並び: (名前) → (その他希望・連絡) → 1日〜末日。
+    // 改行やタブがあると貼り付けで行や列がずれるので、空白に置き換える
     function tsv() {
-      return people.map(p => (withName.checked ? [p.name] : []).concat(sh.days.map(x => cell(p, x)))
-        .map(v => String(v).replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\r\n');
+      return people.map(p => (withName.checked ? [p.name] : []).concat(withNote.checked ? [p.note || ''] : [], sh.days.map(x => cell(p, x)))
+        .map(v => String(v).replace(/[\t\r\n]+/g, ' ').trim()).join('\t')).join('\r\n');
+    }
+    // 貼り付けるときに選ぶセル(コピーした範囲の左上)
+    function startCell() {
+      return withName.checked ? '1人目の名前' : withNote.checked ? '1人目の希望(D列)' : '1人目の1日';
     }
     async function copyTable() {
       const text = tsv();
@@ -2078,10 +2087,18 @@ function shiftDetail(shiftId) {
       }
       const pend = people.filter(p => !p.submittedAt).length;
       copyMsg.replaceChildren(h('div', { class: 'ok' }, people.length + '人 × ' + sh.days.length + '日分をコピーしました。Excelのシフト表で「'
-        + (withName.checked ? '1人目の名前' : '1人目の1日') + '」のセルを選んで、貼り付け(Ctrl+V)してください。'
+        + startCell() + '」のセルを選んで、貼り付け(Ctrl+V)してください。'
         + (pend ? '(未提出の' + pend + '人は空欄です)' : '')));
     }
-    withName.addEventListener('change', () => setMsg(copyMsg, null));
+    withName.addEventListener('change', () => { setMsg(copyMsg, null); drawHint(); });
+    withNote.addEventListener('change', () => { setMsg(copyMsg, null); drawHint(); });
+    const hint = h('div', { class: 'sub', style: 'margin-top:4px' });
+    function drawHint() {
+      hint.textContent = 'コピーする列: ' + [withName.checked ? '名前' : '', withNote.checked ? 'その他希望・連絡' : '', '1日〜' + sh.days.length + '日']
+        .filter(Boolean).join(' → ') + '。Excelでは「' + startCell() + '」のセルを選んで貼り付けます。'
+        + (withName.checked && withNote.checked ? '(名前と希望が隣の列に入ります。間に職種などの列がある場合は、名前のチェックを外してください)' : '');
+    }
+    drawHint();
     fillClosed.addEventListener('change', () => { setMsg(copyMsg, null); drawTable(); });
 
     // ---- 行の並べ替え(このシフト希望だけの並び順。Excelのシフト表の行の順に合わせる) ----
@@ -2158,7 +2175,9 @@ function shiftDetail(shiftId) {
         h('div', { class: 'sub', style: 'margin-top:4px' }, '下の表の順(上から)で、1日〜' + sh.days.length + '日の記号をコピーします。行の順がExcelと違うときは「行の並べ替え」で合わせてください。'),
         h('div', { class: 'row', style: 'margin-top:8px;gap:16px;font-size:14px' },
           h('label', {}, fillClosed, ' 休園日に「休」を入れる'),
+          h('label', {}, withNote, ' その他希望・連絡も含める'),
           h('label', {}, withName, ' 名前の列も含める')),
+        hint,
         h('button', { class: 'block', onclick: copyTable }, '表をコピー(Excelに貼り付け用)'),
         copyMsg,
         h('div', { class: 'note' }, '貼り付けると、その範囲のセルは上書きされます(空欄の日も空欄で上書きされます)。勤務を入れる前に貼り付けてください。'),
