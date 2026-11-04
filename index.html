@@ -133,6 +133,40 @@
   .draft { font-size:12px; color:var(--sub); text-align:right; min-height:1.4em; margin-top:6px; }
   .imp ol { margin:6px 0; padding-left:1.8em; font-size:14px; }
   .imp li { margin:4px 0; }
+  /* シフト希望 */
+  .scard { padding:12px; }
+  .sday { display:grid; grid-template-columns:3em 1fr; gap:2px 6px; align-items:center; padding:6px 2px; border-bottom:1px solid var(--line); }
+  .sday .dl .wd { display:block; font-size:12px; }
+  .sday.chosen { background:#f3f8fd; }
+  /* 休園日(日祝・年末年始など)の行は、Excelのシフト表の日祝の列と同じく淡いピンク */
+  .sday.closed { background:#fdeaed; color:#b4606d; }
+  .sday.closed .sub { color:#b4606d; font-weight:600; }
+  .sday .dl { font-weight:600; font-size:14px; line-height:1.3; }
+  .sday .ev { font-size:11px; font-weight:400; color:var(--sub); }
+  .wd.sat { color:#3d6482; }
+  .wd.sun { color:var(--pink-ink); }
+  /* 選択肢は1日1行に収まるよう、行の幅を等分する(--n: 選択肢の数) */
+  .sopts { display:grid; grid-template-columns:repeat(var(--n), minmax(0, 1fr)); gap:3px; }
+  button.sopt { font-size:12px; line-height:1.2; padding:7px 1px; border-radius:10px; background:#fff; color:var(--ink); border:1.5px solid var(--line); font-weight:600; white-space:normal; word-break:keep-all; overflow-wrap:anywhere; }
+  button.sopt:hover { filter:none; background:#f6f9fd; }
+  button.sopt.on { background:#e3f0fb; border-color:#7fb6e6; color:#2f5878; }
+  .sdedit { display:grid; grid-template-columns:5.2em auto 1fr; gap:6px 8px; align-items:center; padding:4px 2px; border-bottom:1px solid var(--line); font-size:14px; }
+  .sdedit.closed { background:#fdeaed; }
+  .sdedit input[type=text] { padding:6px 9px; font-size:14px; }
+  .scnt { display:inline-flex; flex-wrap:wrap; gap:4px; vertical-align:middle; }
+  .scnt-c { font-size:12px; font-weight:600; padding:1px 8px; border-radius:99px; border:1px solid; white-space:nowrap; }
+  .soptedit { display:grid; grid-template-columns:1fr 5.5em 6.5em auto; gap:6px; align-items:center; margin:6px 0; }
+  .soptedit select { padding:7px 6px; font-size:14px; }
+  .soptedit input { padding:7px 10px; font-size:14px; }
+  .stbl { overflow-x:auto; margin-top:8px; }
+  table.shift { width:auto; border-collapse:collapse; font-size:12px; white-space:nowrap; }
+  table.shift th, table.shift td { text-align:center; padding:3px 5px; border:1px solid var(--line); min-width:2.2em; }
+  table.shift .nm { text-align:left; position:sticky; left:0; background:#fff; z-index:1; }
+  table.shift .cl { background:#fdeaed; color:#b4606d; }
+  table.shift .ev { font-size:10px; color:var(--sub); white-space:normal; max-width:4em; line-height:1.2; }
+  table.shift tr.pend .nm { color:var(--pink-ink); }
+  table.shift .cnt { min-width:2.6em; font-weight:600; }
+  table.shift tr:not(:first-child) th.cnt { border-top-color:transparent; }
 </style>
 </head>
 <body>
@@ -144,7 +178,7 @@
 // ====== 版番号 ======
 // 画面(この index.html)を修正したら、ここの番号を上げて、下の更新履歴に1行足す。
 // 番号は「年.月.日-その日の何回目か」。GAS側の版番号(コード.gs の GAS_VERSION)とは別に数える。
-const APP_VERSION = '2026.10.30-1';
+const APP_VERSION = '2026.11.04-1';
 // 更新履歴(画面)
 //  2026.10.26-1  版番号の表示を追加。回収メモ(提出物の回収管理)を追加。回収済みの人を下へ並べる、
 //                チェックした瞬間に色を変える、提出物の欄は未提出のものだけ表示、担当している回収メモのカード。
@@ -154,6 +188,10 @@ const APP_VERSION = '2026.10.30-1';
 //  2026.10.26-3  ログイン後の画面から「担当しているもの」のカードをなくした(自分の未回答・未提出だけを表示)。
 //                担当の仕事は「自分が担当している管理」ボタンから開く。
 //  2026.10.30-1  アンケート・回収メモの一覧を「現行」と「アーカイブ」(締め切り・期限切れ)に分けた。
+//  2026.11.04-1  シフト希望を追加(月を選ぶと日付・曜日・祝日を自動で並べる。1日1つ選んで提出、締め切りまで出し直し可。
+//                集計はExcelのシフト表に貼り付けられる形でコピー。行の並び順はシフト希望ごとにドラッグで変えられる)。
+//                選択肢ごとに色を付け、集計の表に1人ずつの日数(有給○日など)と全員の合計を出す。
+//                休園日の行はピンクにする。12月・1月の作成画面に年末年始を休園日にするボタン。
 
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzArLDP5bk6o9l0yoN1SCvu0aT69dIKvM-hYlCTYMHhZDgvWSfpCr2Ez9cNekm0DHNP/exec';
 
@@ -317,7 +355,12 @@ function statusGroups(people) {
 // 職員の一覧画面に出す回答状況。
 // ふだんはバーと人数だけ。「名前を見る」で開くと、未回答(あなたが先頭)と回答済み(回答した順)を出す。
 // 遅れがちな人が「周りはもう済ませている」と気付けるようにするのが目的。
-function staffProgress(v) {
+// o: シフト希望などで言葉を変えるとき { key, pend: '未提出', done: '提出済み', order: '提出した順', meLeft: 自分がまだか }
+function staffProgress(v, o) {
+  o = o || {};
+  const PEND = o.pend || '未回答', DONE = o.done || '回答済み', key = o.key || v.surveyId;
+  // アンケートの一覧に出るのは自分がまだ答えていないものだけなので、ふつうは未回答に自分が入っている
+  const meLeft = o.meLeft !== false;
   const pr = v.progress;
   if (!pr || !pr.total) return null;
   // 無記名は人数だけ(名前は送られてこない)
@@ -325,28 +368,27 @@ function staffProgress(v) {
   const done = people.filter(p => p.done);   // GAS側で回答した順に並んでいる
   const pend = people.filter(p => !p.done).sort((a, b) => (b.me ? 1 : 0) - (a.me ? 1 : 0));
   const pendN = pr.total - pr.done;
-  // この一覧に出るのは自分がまだ答えていないアンケートだけなので、未回答には必ず自分が入っている
   const names = h('div', { class: 'pnames' },
-    h('div', { class: 'pgrp pend' }, '未回答 ' + pendN + '人'),
+    h('div', { class: 'pgrp pend' }, PEND + ' ' + pendN + '人'),
     h('div', { class: 'plist' }, pend.length ? pend.map((p, i) => [i ? '、' : '',
       p.me ? h('b', { class: 'pme' }, p.name + '(あなた)') : p.name]) : 'なし'),
-    h('div', { class: 'pgrp' }, '回答済み ' + pr.done + '人(回答した順)'),
+    h('div', { class: 'pgrp' }, DONE + ' ' + pr.done + '人(' + (o.order || '回答した順') + ')'),
     h('div', { class: 'plist done' }, done.length ? done.map(p => p.name).join('、') : 'まだいません'));
   S.st.openProg = S.st.openProg || {};   // 開いた状態はアンケートごとに覚えておく(ログアウトまで)
   const tog = h('button', { class: 'ptoggle', type: 'button' });
   function apply() {
-    const open = !!S.st.openProg[v.surveyId];
+    const open = !!S.st.openProg[key];
     names.style.display = open ? '' : 'none';
     tog.textContent = open ? '▾ 名前を閉じる' : '▸ 名前を見る';
   }
-  tog.addEventListener('click', () => { S.st.openProg[v.surveyId] = !S.st.openProg[v.surveyId]; apply(); });
+  tog.addEventListener('click', () => { S.st.openProg[key] = !S.st.openProg[key]; apply(); });
   apply();
   return h('div', { style: 'margin-top:10px' },
     h('div', { class: 'prog' }, h('div', { class: 'bar' }, h('i', { style: 'width:' + Math.round(pr.done * 100 / pr.total) + '%' })),
       h('span', {}, (v.allOrg ? 'この園 ' : '') + pr.done + '/' + pr.total + '人' + (v.allOrg && pr.allTotal ? ' ・ 全園 ' + pr.allDone + '/' + pr.allTotal + '人' : ''))),
     h('div', { class: 'pills' },
-      h('span', { class: 'pill pend' }, '未回答 ' + pendN + '人(あなたを含む)'),
-      h('span', { class: 'pill' }, '回答済み ' + pr.done + '人')),
+      h('span', { class: 'pill pend' }, PEND + ' ' + pendN + '人' + (meLeft ? '(あなたを含む)' : '')),
+      h('span', { class: 'pill' }, DONE + ' ' + pr.done + '人')),
     people.length ? [tog, names] : null);
 }
 
@@ -480,6 +522,7 @@ function staffChangePin() {
 function staffApply(r) {
   S.st.surveys = r.surveys; S.st.answered = r.answered; S.st.managed = r.managed;
   S.st.collections = r.collections || []; S.st.managedCollections = r.managedCollections || 0;
+  S.st.shifts = r.shifts || [];
 }
 
 function staffAfterLogin() {
@@ -504,6 +547,8 @@ function staffList() {
       (S.st.managed + S.st.managedCollections) > 0 ? h('button', { class: 'ghost', onclick: openManage }, '自分が担当している管理('
         + [S.st.managed ? 'アンケート' + S.st.managed : '', S.st.managedCollections ? '回収メモ' + S.st.managedCollections : ''].filter(Boolean).join('・') + ')') : null),
     S.st.notice ? h('div', { class: 'note' }, S.st.notice) : null,
+    // シフト希望は締め切りまで出し直せるので、提出済みでも受付中のあいだは出す
+    staffShiftCards(),
     // ここに出すのは自分がまだやっていないことだけ(回答待ちのアンケート、未提出の提出物)
     list.map(v => h('div', { class: 'card' },
           h('div', {}, v.allOrg ? h('span', { class: 'tag lav' }, '全園共通') : null, audienceTag(v),
@@ -514,7 +559,7 @@ function staffList() {
           staffProgress(v),
           h('button', { class: 'block', onclick: () => staffSurvey(v) },
             draftLoad('draft:a:' + S.st.staffId + ':' + v.surveyId) ? '回答のつづきを入力する(下書きあり)' : '回答する'))),
-    staffTodoCards(list.length),
+    staffTodoCards(list.length + (S.st.shifts || []).filter(x => !x.mine).length),
     h('div', { class: 'center', style: 'margin-top:20px' }, h('button', { class: 'ghost', onclick: staffLogin }, '終了(ログアウト)')));
 }
 
@@ -662,7 +707,7 @@ function adminLogin() {
 
 function adminMain() {
   const tabs = S.ad.hq ? [['surveys', 'アンケート'], ['collections', '回収メモ'], ['settings', '設定']]
-    : S.ad.admin ? [['surveys', 'アンケート'], ['collections', '回収メモ'], ['staff', '職員'], ['settings', '設定']]
+    : S.ad.admin ? [['surveys', 'アンケート'], ['collections', '回収メモ'], ['shifts', 'シフト希望'], ['staff', '職員'], ['settings', '設定']]
     : [['surveys', 'アンケート'], ['collections', '回収メモ']];
   const body = h('div');
   const bar = tabs.length > 1 ? h('div', { class: 'tabs' }, tabs.map(t => h('button', {
@@ -671,6 +716,7 @@ function adminMain() {
     bar, body);
   if (S.ad.tab === 'surveys') adminSurveys(body);
   else if (S.ad.tab === 'collections') adminCollections(body);
+  else if (S.ad.tab === 'shifts') adminShifts(body);
   else if (S.ad.tab === 'staff') adminStaff(body);
   else adminSettings(body);
 }
@@ -762,41 +808,13 @@ function adminStaff(body) {
           h('button', { class: 'ghost small', disabled: i === 0, onclick: () => move(i, -1), 'aria-label': '上へ' }, '▲'),
           h('button', { class: 'ghost small', disabled: i === order.length - 1, onclick: () => move(i, 1), 'aria-label': '下へ' }, '▼'));
         row.dataset.id = s.staffId;
-        row.addEventListener('pointerdown', e => startDrag(e, row));
+        row.addEventListener('pointerdown', e => sortDrag(e, row, wrap, () => {
+          const ids = [...wrap.children].map(r => r.dataset.id);
+          order.sort((a, b) => ids.indexOf(a.staffId) - ids.indexOf(b.staffId));
+          draw();   // 番号と▲▼を付け直す
+        }));
         return row;
       }));
-    }
-    // ドラッグ: マウスは行のどこからでも、スマホは左の「⠿」をつかんで動かす(行の他の場所は画面のスクロールに使う)
-    function startDrag(e, row) {
-      if (e.button > 0 || e.target.closest('button')) return;
-      if (e.pointerType !== 'mouse' && !e.target.closest('.grip')) return;
-      e.preventDefault();
-      row.setPointerCapture(e.pointerId);
-      row.classList.add('dragging');
-      const onMove = ev => {
-        // 指(カーソル)より上にある行の数 = 入るべき位置。
-        // つかんでいる行を抜き差しするとドラッグが切れるので、隣の行のほうを入れ替えて近づける
-        const y = ev.clientY;
-        const rows = [...wrap.children];
-        const want = rows.filter(r => r !== row && r.getBoundingClientRect().top + r.offsetHeight / 2 < y).length;
-        let idx = rows.indexOf(row);
-        while (idx > want) { wrap.insertBefore(row.previousSibling, row.nextSibling); idx--; }
-        while (idx < want) { wrap.insertBefore(row.nextSibling, row); idx++; }
-        // 画面の端に近づいたら自動でスクロール
-        if (y < 60) window.scrollBy(0, -12); else if (y > window.innerHeight - 60) window.scrollBy(0, 12);
-      };
-      const onEnd = () => {
-        row.removeEventListener('pointermove', onMove);
-        row.removeEventListener('pointerup', onEnd);
-        row.removeEventListener('pointercancel', onEnd);
-        row.classList.remove('dragging');
-        const ids = [...wrap.children].map(r => r.dataset.id);
-        order.sort((a, b) => ids.indexOf(a.staffId) - ids.indexOf(b.staffId));
-        draw();   // 番号と▲▼を付け直す
-      };
-      row.addEventListener('pointermove', onMove);
-      row.addEventListener('pointerup', onEnd);
-      row.addEventListener('pointercancel', onEnd);
     }
     save.addEventListener('click', () => {
       withBusy(save, call('adminReorderStaff', S.ad.cred, order.map(s => s.staffId)).then(() => {
@@ -830,6 +848,38 @@ function adminStaff(body) {
       h('div', { class: 'sub', style: 'margin-top:4px' }, '「園長にする」を押した職員には、全園共通の「園長のみ」アンケートが表示されます(園長も職員として名前を登録してください)。'),
       h('div', { class: 'sub', style: 'margin-top:4px' }, '退職・異動した方は「無効にする」を選ぶと、名前が回答画面に出なくなります(過去の回答は残ります)。')));
   load();
+}
+
+// 並べ替えのドラッグ(職員一覧・シフト希望の行の順で共通)。done: 指を離したあとに呼ぶ
+// マウスは行のどこからでも、スマホは左の「⠿」をつかんで動かす(行の他の場所は画面のスクロールに使う)
+function sortDrag(e, row, wrap, done) {
+  if (e.button > 0 || e.target.closest('button')) return;
+  if (e.pointerType !== 'mouse' && !e.target.closest('.grip')) return;
+  e.preventDefault();
+  row.setPointerCapture(e.pointerId);
+  row.classList.add('dragging');
+  const onMove = ev => {
+    // 指(カーソル)より上にある行の数 = 入るべき位置。
+    // つかんでいる行を抜き差しするとドラッグが切れるので、隣の行のほうを入れ替えて近づける
+    const y = ev.clientY;
+    const rows = [...wrap.children];
+    const want = rows.filter(r => r !== row && r.getBoundingClientRect().top + r.offsetHeight / 2 < y).length;
+    let idx = rows.indexOf(row);
+    while (idx > want) { wrap.insertBefore(row.previousSibling, row.nextSibling); idx--; }
+    while (idx < want) { wrap.insertBefore(row.nextSibling, row); idx++; }
+    // 画面の端に近づいたら自動でスクロール
+    if (y < 60) window.scrollBy(0, -12); else if (y > window.innerHeight - 60) window.scrollBy(0, 12);
+  };
+  const onEnd = () => {
+    row.removeEventListener('pointermove', onMove);
+    row.removeEventListener('pointerup', onEnd);
+    row.removeEventListener('pointercancel', onEnd);
+    row.classList.remove('dragging');
+    done();
+  };
+  row.addEventListener('pointermove', onMove);
+  row.addEventListener('pointerup', onEnd);
+  row.addEventListener('pointercancel', onEnd);
 }
 
 // ---- 設定タブ ----
@@ -897,7 +947,7 @@ function adminSurveys(body) {
 function archiveTabs(listBox, list, isArch, key, card) {
   S.ad.arch = S.ad.arch || {};
   const cur = list.filter(x => !isArch(x)), arc = list.filter(isArch);
-  const label = key === 'surveys' ? 'アンケート' : '回収メモ';
+  const label = { surveys: 'アンケート', collections: '回収メモ', shifts: 'シフト希望' }[key];
   const btnCur = h('button', { class: 'small' }), btnArc = h('button', { class: 'small' });
   const body = h('div');
   function draw() {
@@ -1579,6 +1629,513 @@ function collectionDetail(collectionId) {
           catch (e) { dlMsg.textContent = 'ダウンロードできませんでした。'; }
         } }, 'CSVをダウンロード'), dlMsg)));
     if (c.all) select(''); else { drawProg(); drawList(); drawRemind(); }
+  }).catch(e => show(back, errBox(e.message)));
+}
+
+// ====================================================
+//  シフト希望(月ごとの休み希望などの提出)
+// ====================================================
+const WD = '日月火水木金土';
+// 日本の祝日(振替休日・国民の休日を含む)。'月-日' → 祝日名
+function jpHolidays(y) {
+  const H = {};
+  const set = (m, d, n) => { H[m + '-' + d] = n; };
+  const mon = (m, n) => 1 + ((8 - new Date(y, m - 1, 1).getDay()) % 7) + (n - 1) * 7;   // m月の第n月曜日
+  const eq = base => Math.floor(base + 0.242194 * (y - 1980) - Math.floor((y - 1980) / 4));   // 春分・秋分(2099年まで有効)
+  set(1, 1, '元日'); set(1, mon(1, 2), '成人の日'); set(2, 11, '建国記念の日'); set(2, 23, '天皇誕生日');
+  set(3, eq(20.8431), '春分の日'); set(4, 29, '昭和の日'); set(5, 3, '憲法記念日'); set(5, 4, 'みどりの日');
+  set(5, 5, 'こどもの日'); set(7, mon(7, 3), '海の日'); set(8, 11, '山の日'); set(9, mon(9, 3), '敬老の日');
+  set(9, eq(23.2488), '秋分の日'); set(10, mon(10, 2), 'スポーツの日'); set(11, 3, '文化の日'); set(11, 23, '勤労感謝の日');
+  const key = t => (t.getMonth() + 1) + '-' + t.getDate();
+  // 振替休日: 祝日が日曜日なら、その後の最初の祝日でない日
+  Object.keys(H).forEach(k => {
+    const [m, d] = k.split('-').map(Number);
+    if (new Date(y, m - 1, d).getDay() !== 0) return;
+    const t = new Date(y, m - 1, d + 1);
+    while (H[key(t)]) t.setDate(t.getDate() + 1);
+    if (t.getFullYear() === y) H[key(t)] = '振替休日';
+  });
+  // 国民の休日: 前日と翌日が祝日の平日
+  for (let t = new Date(y, 0, 2); t.getFullYear() === y; t.setDate(t.getDate() + 1)) {
+    const p = new Date(t); p.setDate(t.getDate() - 1);
+    const n = new Date(t); n.setDate(t.getDate() + 1);
+    if (!H[key(t)] && t.getDay() !== 0 && H[key(p)] && H[key(n)]) H[key(t)] = '国民の休日';
+  }
+  return H;
+}
+// 'yyyy-MM' の日付一覧を作る。日曜・祝日は休園日にして、祝日名を行事欄に入れておく
+function shiftGenDays(month) {
+  const [y, m] = month.split('-').map(Number);
+  const hol = jpHolidays(y);
+  const n = new Date(y, m, 0).getDate();
+  const out = [];
+  for (let d = 1; d <= n; d++) {
+    const name = hol[m + '-' + d] || '';
+    out.push({ d: d, closed: !!name || new Date(y, m - 1, d).getDay() === 0, note: name });
+  }
+  return out;
+}
+function shiftWd(month, d) { const [y, m] = month.split('-').map(Number); return new Date(y, m - 1, d).getDay(); }
+function shiftMonthLabel(month) { const [y, m] = month.split('-').map(Number); return y + '年' + m + '月'; }
+// 日付の見出し(例: 3日(火)) / 休園日・日曜は赤、土曜は青
+function shiftDayLabel(month, d) {
+  const wd = shiftWd(month, d.d);
+  return [d.d + '日', h('span', { class: 'wd' + (wd === 6 ? ' sat' : '') + (wd === 0 || d.closed ? ' sun' : '') }, '(' + WD[wd] + ')')];
+}
+const SHIFT_DEFAULT_OPTIONS = [
+  { label: '×', code: '×', color: 'pink' }, { label: '有', code: '有', color: 'green' }, { label: '午前半休', code: '前半', color: 'blue' },
+  { label: '午後半休', code: '後半', color: 'lav' }, { label: '夏季休暇', code: '夏季', color: 'orange' }];
+// 選択肢の色(職員のボタン・集計の表で使う)。色を決めていない選択肢は、並び順で自動で付ける
+const SHIFT_COLORS = {
+  pink: { name: 'ピンク', bg: '#ffdfe0', ink: '#a4404f', line: '#f2a7b0' },
+  green: { name: 'みどり', bg: '#dcf2e6', ink: '#2d6a4a', line: '#8fc9b6' },
+  blue: { name: '水色', bg: '#dceefc', ink: '#2f5878', line: '#8fc0ea' },
+  lav: { name: 'むらさき', bg: '#ebe6fb', ink: '#4a3f85', line: '#bdb2ee' },
+  orange: { name: 'オレンジ', bg: '#ffe4d1', ink: '#9a4f2c', line: '#f4b48c' },
+  yellow: { name: 'きいろ', bg: '#fff2bf', ink: '#7a6330', line: '#e8cf72' },
+  teal: { name: '青緑', bg: '#d6f1ef', ink: '#1f6b66', line: '#8ccfc8' },
+  gray: { name: 'グレー', bg: '#ececf1', ink: '#5b5870', line: '#c9c7d3' },
+};
+function shiftColor(o, i) { const keys = Object.keys(SHIFT_COLORS); return SHIFT_COLORS[o.color] || SHIFT_COLORS[keys[i % keys.length]]; }
+function shiftColorStyle(c) { return 'background:' + c.bg + ';color:' + c.ink + ';border-color:' + c.line; }
+// 選択肢ごとの日数を色付きの小さなラベルで並べる(ids: 選んだ選択肢idの配列)。0日の選択肢は出さない(all なら出す)
+function shiftCountChips(options, ids, all) {
+  return h('span', { class: 'scnt' }, options.map((o, i) => {
+    const n = ids.filter(x => x === o.id).length;
+    return n || all ? h('span', { class: 'scnt-c', style: shiftColorStyle(shiftColor(o, i)) }, o.label + ' ' + n) : null;
+  }));
+}
+const SHIFT_DEFAULT_DESC = 'シフト希望の提出をお願いします。\n確定シフト通知:毎月20日までに確定シフトをお知らせします。\n\n'
+  + 'ルール\n・休み希望は「×」を選んでください。\n・半休の場合は「その他希望・連絡」の欄に何番希望かを記載してください。\n'
+  + '・その他、選択肢にないものは「その他希望・連絡」に記載してください。\n'
+  + '・パートの方の細かいシフト希望に関しては「その他希望・連絡」に記載してください。\n'
+  + '・希望がある日以外は選ばないでください。「1番多め」などその日に限定しない場合には「その他希望・連絡」に記載してください。\n\n'
+  + 'シフト希望に関する説明\n・×…休み希望\n・有…有給';
+
+// ---- 職員: ログイン後の画面のシフト希望カード ----
+function staffShiftCards() {
+  return (S.st.shifts || []).map(sh => {
+    const done = !!sh.mine;
+    const draft = draftLoad('draft:s:' + S.st.staffId + ':' + sh.shiftId);
+    return h('div', { class: 'card' },
+      h('div', {}, h('span', { class: 'tag lav' }, 'シフト希望'),
+        done ? h('span', { class: 'tag' }, '提出済み ' + fmtMDHM(sh.mine.updatedAt)) : h('span', { class: 'tag warn' }, '未提出'),
+        sh.deadline ? h('span', { class: 'sub' }, '提出期限 ' + fmtDate(sh.deadline)) : null),
+      h('h2', { style: 'margin-top:6px' }, sh.title),
+      staffProgress(sh, { key: 'shift:' + sh.shiftId, pend: '未提出', done: '提出済み', order: '提出した順', meLeft: !done }),
+      h('button', { class: 'block' + (done ? ' ghost' : ''), onclick: () => staffShift(sh) },
+        draft ? '入力のつづき(下書きあり)' : done ? '提出内容を確認・修正する' : 'シフト希望を提出する'));
+  });
+}
+
+// ---- 職員: シフト希望の提出画面(1日に1つだけ選ぶ。同じボタンをもう一度押すと取り消し) ----
+function staffShift(sh) {
+  S.st.notice = '';
+  const choice = Object.assign({}, sh.mine ? sh.mine.choices : {});
+  const note = h('textarea', { maxlength: '1000', placeholder: '例: 半休は2番希望 / 3日は午前のみ出勤できます', value: sh.mine ? sh.mine.note : '' });
+  const box = h('div');
+  const count = h('div', { class: 'sub', style: 'margin-top:8px' });
+  const dKey = 'draft:s:' + S.st.staffId + ':' + sh.shiftId;
+  const dLabel = h('div', { class: 'draft' });
+  const save = draftSaver(dKey, () => ({ choices: choice, note: note.value }), dLabel);
+  S.flush = save.flush;
+  const draft = draftLoad(dKey);
+  let dNote = null;
+  if (draft) {
+    Object.keys(choice).forEach(k => { delete choice[k]; });
+    Object.assign(choice, draft.v.choices || {});
+    note.value = draft.v.note || '';
+    dNote = h('div', { class: 'ok' }, '前回の入力途中の内容(' + fmtTime(draft.t) + ' 保存)を復元しました。まだ提出されていません。',
+      h('div', { style: 'margin-top:6px' }, h('button', { class: 'ghost small', onclick: () => {
+        if (!confirm('入力途中の内容を消して、' + (sh.mine ? '提出済みの内容' : '最初の状態') + 'に戻します。よろしいですか?')) return;
+        save.cancel(); lsDel(dKey); staffShift(sh);
+      } }, '下書きを消す')));
+  }
+  function updCount() {
+    const ids = Object.values(choice);
+    count.replaceChildren(...(ids.length
+      ? ['選んだ日: ' + ids.length + '日 ', shiftCountChips(sh.options, ids)]
+      : ['まだ選んでいません(希望がなければ、何も選ばずに提出してください)']));
+  }
+  const rows = sh.days.map(d => {
+    const lab = h('div', { class: 'dl' }, shiftDayLabel(sh.month, d), !d.closed && d.note ? h('div', { class: 'ev' }, d.note) : null);
+    if (d.closed) return h('div', { class: 'sday closed' }, lab, h('div', { class: 'sub' }, '休園日' + (d.note ? '(' + d.note + ')' : '')));
+    // 4文字以上は真ん中で折り返す(「午前半休」→「午前/半休」)
+    const btns = sh.options.map(o => h('button', { class: 'sopt', type: 'button' },
+      o.label.length >= 4 ? [o.label.slice(0, Math.ceil(o.label.length / 2)), h('wbr'), o.label.slice(Math.ceil(o.label.length / 2))] : o.label));
+    const row = h('div', { class: 'sday' }, lab, h('div', { class: 'sopts', style: '--n:' + sh.options.length }, btns));
+    // 選んだボタンは選択肢の色で塗る。選んでいないボタンは文字だけその色にする
+    function paint() {
+      btns.forEach((b, i) => {
+        const on = choice[d.d] === sh.options[i].id, c = shiftColor(sh.options[i], i);
+        b.classList.toggle('on', on);
+        b.style.cssText = on ? shiftColorStyle(c) : 'color:' + c.ink;
+      });
+      row.classList.toggle('chosen', !!choice[d.d]);
+    }
+    btns.forEach((b, i) => b.addEventListener('click', () => {
+      const id = sh.options[i].id;
+      if (choice[d.d] === id) delete choice[d.d]; else choice[d.d] = id;
+      paint(); updCount(); save();
+    }));
+    paint();
+    return row;
+  });
+  updCount();
+  const btn = h('button', { class: 'block' }, sh.mine ? '修正して提出する' : '提出する');
+  btn.addEventListener('click', () => {
+    setMsg(box, null);
+    save.cancel(); draftSave(dKey, { choices: choice, note: note.value });   // 送信に失敗しても入力が残るように
+    withBusy(btn, call('staffSubmitShift', S.st.staffId, S.st.pin, sh.shiftId, choice, note.value).then(r => {
+      lsDel(dKey);
+      S.st.notice = '「' + sh.title + '」を提出しました。' + (sh.deadline ? fmtDate(sh.deadline) + 'までは' : '受付中は') + '何度でも修正できます。';
+      staffLoadList();
+    }).catch(e => setMsg(box, errBox(e.message))));
+  });
+  show(h('div', { class: 'row between' }, h('span', { class: 'tag lav' }, 'シフト希望'),
+      h('button', { class: 'ghost small', onclick: () => { save.flush(); staffList(); } }, '一覧に戻る')),
+    h('h1', {}, sh.title),
+    h('div', { class: 'sub' }, '対象: ' + shiftMonthLabel(sh.month) + (sh.deadline ? ' / 提出期限: ' + fmtDate(sh.deadline) : '')),
+    sh.description ? h('div', { class: 'qnote sub-of', style: 'margin:10px 0' }, sh.description) : null,
+    sh.mine ? h('div', { class: 'ok' }, '提出済みです(' + fmtMDHM(sh.mine.updatedAt) + ')。直したいときは、選び直して「修正して提出する」を押してください。') : null,
+    dNote,
+    h('div', { class: 'card scard' },
+      h('div', { class: 'sub', style: 'margin-bottom:6px' }, '希望がある日だけ、1つ選んでください。同じボタンをもう一度押すと取り消せます。'),
+      rows, count),
+    h('div', { class: 'card' }, h('label', { class: 'f', style: 'margin-top:0' }, 'その他希望・連絡'), note),
+    box, btn, dLabel,
+    h('div', { class: 'note' }, DEVICE_NOTICE));
+  note.addEventListener('input', save);
+}
+
+// ---- 園長: シフト希望タブ(一覧) ----
+function adminShifts(body) {
+  const box = h('div');
+  const listBox = h('div', {}, h('div', { class: 'sub' }, '読み込み中…'));
+  body.append(h('div', { class: 'row between' }, h('h2', { style: 'margin:0' }, 'シフト希望一覧'),
+      h('button', { onclick: () => shiftCreate() }, '+ シフト希望を作る')),
+    h('div', { class: 'sub', style: 'margin:6px 0 0' }, '月を選ぶと、日付・曜日・祝日が自動で入ります。集まった希望は、Excelのシフト表にそのまま貼り付けられます。'),
+    box, listBox);
+  if (S.ad.notice) { setMsg(box, h('div', { class: 'ok' }, S.ad.notice)); S.ad.notice = ''; }
+  call('adminGetShifts', S.ad.cred).then(list => {
+    S.ad.shiftList = list;   // 新しく作るときに、前回の説明・選択肢を引き継ぐため
+    if (!list.length) return listBox.replaceChildren(h('div', { class: 'card sub' }, 'まだシフト希望がありません。上のボタンから作りましょう。'));
+    archiveTabs(listBox, list, x => !x.open, 'shifts', x => h('div', { class: 'card' },
+      h('div', {}, h('span', { class: 'tag ' + (x.open ? '' : 'warn') }, x.open ? '受付中' : '受付終了')),
+      h('h2', { style: 'margin-top:6px' }, x.title),
+      h('div', { class: 'sub' }, '対象: ' + shiftMonthLabel(x.month) + ' / 提出期限: ' + fmtDate(x.deadline)),
+      h('div', { class: 'prog' }, h('div', { class: 'bar' }, h('i', { style: 'width:' + (x.target ? Math.round(x.done * 100 / x.target) : 0) + '%' })),
+        h('span', {}, x.done + '/' + x.target + '人 提出済み')),
+      h('div', { class: 'row', style: 'margin-top:10px' },
+        h('button', { class: 'small', onclick: () => shiftDetail(x.shiftId) }, '集計・Excelに貼る'),
+        h('button', { class: 'ghost small', onclick: () => shiftShareText(x) }, 'Chatwork用の依頼文'),
+        h('button', { class: 'ghost small', onclick: () => shiftCreate(x) }, '内容を修正'),
+        h('button', { class: 'ghost small', onclick: () => {
+          call('adminSetShiftStatus', S.ad.cred, x.shiftId, x.status === 'open' ? 'closed' : 'open').then(adminMain).catch(e => setMsg(box, errBox(e.message)));
+        } }, x.status === 'open' ? '受付を締め切る' : '受付を再開'),
+        h('button', { class: 'danger small', onclick: () => {
+          if (!confirm('「' + x.title + '」と、提出されたシフト希望をすべて削除します。元に戻せません。よろしいですか?')) return;
+          call('adminDeleteShift', S.ad.cred, x.shiftId).then(adminMain).catch(e => setMsg(box, errBox(e.message)));
+        } }, '削除'))));
+  }).catch(e => setMsg(box, errBox(e.message)));
+}
+
+function shiftShareText(x, after) {
+  const text = '【シフト希望の提出のお願い】\n' + x.title + '\n'
+    + (x.deadline ? '提出期限: ' + fmtDate(x.deadline) + '\n' : '')
+    + '\n▼提出はこちら\n' + BOOT.baseUrl + '\n\n'
+    + '園と名前を選び、PIN(4桁)を入力すると、ログイン後の画面に「シフト希望」が出ます。\n'
+    + '※提出期限までは、何度でも修正できます。\n' + DEVICE_NOTICE;
+  show(h('button', { class: 'ghost small', onclick: after || adminMain }, '← 戻る'), h('h1', {}, 'Chatwork用の依頼文'),
+    h('div', { class: 'card' }, copyBox(text, 'コピー'), h('div', { class: 'sub', style: 'margin-top:8px' }, 'Chatworkのグループチャットに貼り付けて送信してください。')));
+}
+
+// ---- 園長: シフト希望の作成・修正(edit: 一覧の1件。修正のとき対象の月は変えない) ----
+function shiftCreate(edit) {
+  S.ad.tab = 'shifts';
+  const tpl = edit || (S.ad.shiftList && S.ad.shiftList[0]) || null;   // 新規は前回のものを引き継ぐ
+  const pad = n => String(n).padStart(2, '0');
+  const now = new Date();
+  const nx = new Date(now.getFullYear(), now.getMonth() + 1, 1);   // 新規の初期値は来月
+  const ySel = h('select', { disabled: !!edit }), mSel = h('select', { disabled: !!edit });
+  for (let y = now.getFullYear() - 1; y <= now.getFullYear() + 1; y++) ySel.append(h('option', { value: String(y) }, y + '年'));
+  for (let m = 1; m <= 12; m++) mSel.append(h('option', { value: pad(m) }, m + '月'));
+  const curMonth = edit ? edit.month : nx.getFullYear() + '-' + pad(nx.getMonth() + 1);
+  ySel.value = curMonth.slice(0, 4); mSel.value = curMonth.slice(5, 7);
+  const month = () => ySel.value + '-' + mSel.value;
+  const title = h('input', { type: 'text', maxlength: '100', value: edit ? edit.title : '' });
+  let titleTouched = !!edit;
+  title.addEventListener('input', () => { titleTouched = true; });
+  const desc = h('textarea', { style: 'min-height:160px', value: tpl ? tpl.description : SHIFT_DEFAULT_DESC });
+  const deadline = h('input', { type: 'date', value: edit ? edit.deadline : '' });
+  let deadlineTouched = !!edit;
+  deadline.addEventListener('input', () => { deadlineTouched = true; });
+  const box = h('div');
+
+  // ---- 選択肢(ボタンの文字・Excelに入れる記号・色) ----
+  const optBox = h('div');
+  const opts = [];
+  function addOpt(o) {
+    const label = h('input', { type: 'text', maxlength: '20', placeholder: 'ボタンの文字(例: ×)', value: o.label || '' });
+    const code = h('input', { type: 'text', maxlength: '10', placeholder: 'Excelの記号', value: o.code || '' });
+    // 色: 決まっていなければ、まだ使っていない色を自動で選ぶ
+    const usedColors = opts.map(x => x.color.value);
+    const color = h('select', {}, Object.keys(SHIFT_COLORS).map(k => h('option', { value: k }, SHIFT_COLORS[k].name)));
+    color.value = SHIFT_COLORS[o.color] ? o.color : (Object.keys(SHIFT_COLORS).find(k => usedColors.indexOf(k) < 0) || 'gray');
+    const paint = () => { color.style.cssText = shiftColorStyle(SHIFT_COLORS[color.value]); };
+    color.addEventListener('change', paint); paint();
+    const x = { id: o.id || '', label: label, code: code, color: color };
+    const el = h('div', { class: 'soptedit' }, label, code, color,
+      h('button', { class: 'danger small', type: 'button', onclick: () => { opts.splice(opts.indexOf(x), 1); el.remove(); } }, '削除'));
+    x.el = el; opts.push(x); optBox.append(el);
+  }
+  // 修正では id を残す(提出済みの選択とつながっている)。新規は前回の選択肢の文字・記号・色だけ引き継ぐ
+  (tpl ? tpl.options : SHIFT_DEFAULT_OPTIONS).forEach((o, i) => addOpt(edit ? o
+    : { label: o.label, code: o.code, color: o.color || Object.keys(SHIFT_COLORS)[i % 8] }));
+
+  // ---- 日ごとの設定(休園日・行事) ----
+  const dayBox = h('div');
+  let days = edit ? edit.days.map(d => Object.assign({}, d)) : shiftGenDays(month());
+  function drawDays() {
+    dayBox.replaceChildren(...days.map(d => {
+      const cb = h('input', { type: 'checkbox', checked: d.closed });
+      const ev = h('input', { type: 'text', maxlength: '30', placeholder: '行事など(例: 秋の遠足)', value: d.note });
+      const row = h('div', { class: 'sdedit' + (d.closed ? ' closed' : '') },
+        h('div', { class: 'dl', style: 'font-weight:600' }, shiftDayLabel(month(), d)),
+        h('label', { style: 'font-size:13px;white-space:nowrap' }, cb, ' 休園日'), ev);
+      cb.addEventListener('change', () => { d.closed = cb.checked; row.classList.toggle('closed', d.closed); });
+      ev.addEventListener('input', () => { d.note = ev.value; });
+      return row;
+    }));
+  }
+  function autoFill() {
+    const [y, m] = month().split('-').map(Number);
+    if (!titleTouched) title.value = S.ad.title + ' シフト希望(' + m + '月分)';
+    // 提出期限の初期値: 前の月の10日
+    if (!deadlineTouched) { const p = new Date(y, m - 2, 10); deadline.value = p.getFullYear() + '-' + pad(p.getMonth() + 1) + '-' + pad(p.getDate()); }
+  }
+  // 年末年始(12/29〜12/31、1/1〜1/3)をまとめて休園日にする。12月・1月のときだけボタンを出す
+  const nyBtn = h('button', { class: 'ghost small', type: 'button', style: 'margin:8px 0' });
+  function applyNyBtn() {
+    const m = Number(mSel.value);
+    nyBtn.style.display = m === 12 || m === 1 ? '' : 'none';
+    nyBtn.textContent = m === 12 ? '年末(12/29〜12/31)を休園日にする' : '年始(1/1〜1/3)を休園日にする';
+  }
+  nyBtn.addEventListener('click', () => {
+    const range = Number(mSel.value) === 12 ? [29, 30, 31] : [1, 2, 3];
+    days.forEach(d => { if (range.indexOf(d.d) >= 0) { d.closed = true; if (!d.note) d.note = '年末年始'; } });
+    drawDays();
+  });
+  function onMonth() {
+    days = shiftGenDays(month());
+    autoFill(); drawDays(); applyNyBtn();
+  }
+  applyNyBtn();
+  ySel.addEventListener('change', onMonth); mSel.addEventListener('change', onMonth);
+  if (!edit) autoFill();
+  drawDays();
+
+  const saveBtn = h('button', { class: 'block' }, edit ? '修正を保存する' : '作成する');
+  saveBtn.addEventListener('click', () => {
+    setMsg(box, null);
+    const x = {
+      month: month(), title: title.value, description: desc.value, deadline: deadline.value,
+      days: days.map(d => ({ d: d.d, closed: !!d.closed, note: String(d.note || '').trim() })),
+      options: opts.map(o => ({ id: o.id, label: o.label.value.trim(), code: o.code.value.trim(), color: o.color.value })).filter(o => o.label),
+    };
+    if (!x.title.trim()) return setMsg(box, errBox('タイトルを入力してください。'));
+    if (!x.options.length) return setMsg(box, errBox('選択肢を1つ以上入れてください。'));
+    if (!edit && (S.ad.shiftList || []).some(s => s.month === x.month)
+      && !confirm(shiftMonthLabel(x.month) + 'のシフト希望はすでにあります。もう1つ作りますか?')) return;
+    const p = edit ? call('adminUpdateShift', S.ad.cred, edit.shiftId, x) : call('adminCreateShift', S.ad.cred, x);
+    withBusy(saveBtn, p.then(r => {
+      S.ad.notice = '「' + x.title.trim() + '」を' + (edit ? '修正' : '作成') + 'しました。';
+      if (edit) return adminMain();
+      shiftShareText({ title: x.title.trim(), deadline: x.deadline, shiftId: r.shiftId }, adminMain);
+    }).catch(e => setMsg(box, errBox(e.message))));
+  });
+
+  show(h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る'),
+    h('h1', {}, edit ? 'シフト希望を修正' : 'シフト希望を作る'),
+    h('div', { class: 'card' },
+      h('label', { class: 'f', style: 'margin-top:0' }, '対象の月' + (edit ? '(修正では変えられません)' : '')),
+      h('div', { class: 'row', style: 'flex-wrap:nowrap' }, ySel, mSel),
+      h('label', { class: 'f' }, 'タイトル'), title,
+      h('label', { class: 'f' }, '提出期限(この日の終わりまで提出・修正できます)'), deadline,
+      h('label', { class: 'f' }, '説明・ルール(職員の提出画面の上に出ます)'), desc),
+    h('div', { class: 'card' },
+      h('h2', {}, '選択肢'),
+      h('div', { class: 'sub' }, '左から、職員の画面のボタンの文字、Excelのシフト表に入れる記号(空ならボタンの文字をそのまま入れます)、色です。色は職員のボタンと集計の表で使います。'),
+      edit ? h('div', { class: 'sub' }, 'すでに選んで提出した人がいる選択肢は消せません(文字や記号は変えられます)。') : null,
+      optBox,
+      h('button', { class: 'ghost small', type: 'button', onclick: () => addOpt({}) }, '+ 選択肢を追加')),
+    h('div', { class: 'card' },
+      h('h2', {}, '日付と休園日・行事'),
+      h('div', { class: 'sub' }, '日曜日と祝日は、最初から休園日にしてあります。年末年始などは「休園日」にチェックを入れてください。休園日の日は、職員は選べません(ピンクの行になります)。行事は職員の画面の日付の下に出ます。'),
+      nyBtn, dayBox),
+    box, saveBtn);
+}
+
+// ---- 園長: 集計(Excelのシフト表に貼り付け・行の並べ替え・未提出者) ----
+function shiftDetail(shiftId) {
+  S.ad.tab = 'shifts';
+  const back = h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る');
+  show(back, h('div', { class: 'sub' }, '読み込み中…'));
+  call('adminGetShift', S.ad.cred, shiftId).then(d => {
+    const sh = d.shift;
+    let people = d.people;
+    const optById = {};
+    sh.options.forEach(o => { optById[o.id] = o; });
+    const msg = h('div');
+    const withName = h('input', { type: 'checkbox' });
+    const fillClosed = h('input', { type: 'checkbox', checked: true });
+    const tblBox = h('div', { class: 'stbl' });
+    const copyMsg = h('div', { class: 'sub', style: 'margin-top:6px' });
+    const sortBox = h('div');
+    const pendBox = h('div');
+    const noteBox = h('div');
+
+    function cell(p, day) {
+      if (day.closed) return fillClosed.checked ? '休' : '';
+      const id = p.choices[day.d];
+      return id && optById[id] ? optById[id].code : '';
+    }
+    const colorOf = {};
+    sh.options.forEach((o, i) => { colorOf[o.id] = shiftColor(o, i); });
+    // 1人分の、選択肢ごとの日数(休園日の選択は数えない)
+    function countsOf(p) {
+      const ids = sh.days.filter(x => !x.closed).map(x => p.choices[x.d]).filter(id => id && optById[id]);
+      return sh.options.map(o => ids.filter(id => id === o.id).length);
+    }
+    function drawTable() {
+      // 名前のすぐ右に、選択肢ごとの日数(有給は何日か、などを横にスクロールせずに見られる)
+      // 見出しの1行目だけ選択肢名を色付きで出す(2・3行目は空欄)
+      const cntHead = first => sh.options.map(o => h('th', { class: 'cnt', style: first ? shiftColorStyle(colorOf[o.id]) : '' }, first ? o.label : ''));
+      const head1 = h('tr', {}, h('th', { class: 'nm' }, '名前'), cntHead(true), sh.days.map(x => h('th', { class: x.closed ? 'cl' : '' }, x.d)));
+      const head2 = h('tr', {}, h('th', { class: 'nm' }, ''), cntHead(false), sh.days.map(x => h('th', { class: x.closed ? 'cl' : '' }, shiftDayLabel(sh.month, x)[1])));
+      const head3 = h('tr', {}, h('th', { class: 'nm sub' }, '行事'), cntHead(false), sh.days.map(x => h('th', { class: 'ev' + (x.closed ? ' cl' : '') }, x.closed ? '休' + (x.note ? ' ' + x.note : '') : x.note)));
+      tblBox.replaceChildren(h('table', { class: 'shift' }, head1, head2, head3,
+        people.map(p => {
+          const cn = countsOf(p);
+          return h('tr', { class: p.submittedAt ? '' : 'pend' },
+            h('td', { class: 'nm' }, p.name, p.submittedAt ? null : h('span', { class: 'tag warn', style: 'margin-left:4px' }, '未提出')),
+            sh.options.map((o, j) => h('td', { class: 'cnt', style: cn[j] ? shiftColorStyle(colorOf[o.id]) : '' }, p.submittedAt ? cn[j] : '')),
+            sh.days.map(x => {
+              const v = cell(p, x), id = p.choices[x.d];
+              return x.closed ? h('td', { class: 'cl' }, v)
+                : h('td', { style: v && colorOf[id] ? shiftColorStyle(colorOf[id]) + ';font-weight:600' : '' }, v);
+            }));
+        })));
+      // 全員分の合計(選択肢ごと)
+      const all = [];
+      people.forEach(p => sh.days.forEach(x => { const id = p.choices[x.d]; if (!x.closed && id && optById[id]) all.push(id); }));
+      totalBox.replaceChildren('全員の合計: ', shiftCountChips(sh.options, all, true));
+    }
+    const totalBox = h('div', { class: 'sub', style: 'margin-top:10px' });
+    // Excelに貼る形(タブ区切り)。行は並び順どおり、列は1日〜末日
+    function tsv() {
+      return people.map(p => (withName.checked ? [p.name] : []).concat(sh.days.map(x => cell(p, x)))
+        .map(v => String(v).replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\r\n');
+    }
+    async function copyTable() {
+      const text = tsv();
+      try { await navigator.clipboard.writeText(text); }
+      catch (e) {
+        const ta = h('textarea', { style: 'position:fixed;top:0;left:0;opacity:0' });
+        ta.value = text; document.body.append(ta); ta.select();
+        try { document.execCommand('copy'); } catch (e2) { ta.remove(); return copyMsg.replaceChildren(errBox('コピーできませんでした。別のブラウザで試してください。')); }
+        ta.remove();
+      }
+      const pend = people.filter(p => !p.submittedAt).length;
+      copyMsg.replaceChildren(h('div', { class: 'ok' }, people.length + '人 × ' + sh.days.length + '日分をコピーしました。Excelのシフト表で「'
+        + (withName.checked ? '1人目の名前' : '1人目の1日') + '」のセルを選んで、貼り付け(Ctrl+V)してください。'
+        + (pend ? '(未提出の' + pend + '人は空欄です)' : '')));
+    }
+    withName.addEventListener('change', () => setMsg(copyMsg, null));
+    fillClosed.addEventListener('change', () => { setMsg(copyMsg, null); drawTable(); });
+
+    // ---- 行の並べ替え(このシフト希望だけの並び順。Excelのシフト表の行の順に合わせる) ----
+    function openSort() {
+      const order = people.slice();
+      const wrap = h('div');
+      const save = h('button', { class: 'small' }, 'この順番で保存');
+      function move(i, dd) {
+        const j = i + dd;
+        if (j < 0 || j >= order.length) return;
+        const t = order[i]; order[i] = order[j]; order[j] = t;
+        draw();
+      }
+      function draw() {
+        wrap.replaceChildren(...order.map((p, i) => {
+          const row = h('div', { class: 'sortrow' },
+            h('span', { class: 'grip', 'aria-hidden': 'true' }, '⠿'),
+            h('span', { class: 'sortno' }, String(i + 1)),
+            h('span', { class: 'sortname' }, p.name),
+            h('button', { class: 'ghost small', disabled: i === 0, onclick: () => move(i, -1), 'aria-label': '上へ' }, '▲'),
+            h('button', { class: 'ghost small', disabled: i === order.length - 1, onclick: () => move(i, 1), 'aria-label': '下へ' }, '▼'));
+          row.dataset.id = p.staffId;
+          row.addEventListener('pointerdown', e => sortDrag(e, row, wrap, () => {
+            const ids = [...wrap.children].map(r => r.dataset.id);
+            order.sort((a, b) => ids.indexOf(a.staffId) - ids.indexOf(b.staffId));
+            draw();
+          }));
+          return row;
+        }));
+      }
+      save.addEventListener('click', () => {
+        withBusy(save, call('adminSetShiftOrder', S.ad.cred, sh.shiftId, order.map(p => p.staffId)).then(() => {
+          people = order;
+          sortBox.replaceChildren();
+          setMsg(msg, h('div', { class: 'ok' }, '行の並び順を保存しました。次に作るシフト希望も、この並びを引き継ぎます。'));
+          drawTable(); setMsg(copyMsg, null);
+        }).catch(e => setMsg(msg, errBox(e.message))));
+      });
+      draw();
+      sortBox.replaceChildren(h('div', { class: 'card' },
+        h('h2', {}, '行の並べ替え'),
+        h('div', { class: 'sub', style: 'margin-bottom:8px' }, 'Excelのシフト表の行と同じ順に並べてください。名前をドラッグして動かします(スマホは左の ⠿ をつかみます。▲▼でも動かせます)。この並びは、このシフト希望だけのものです(職員一覧の並びは変わりません)。'),
+        wrap, h('div', { class: 'row', style: 'margin-top:10px' }, save, h('button', { class: 'ghost small', onclick: () => sortBox.replaceChildren() }, 'やめる'))));
+      sortBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // ---- 未提出者と催促文、その他希望・連絡 ----
+    const pend = people.filter(p => !p.submittedAt);
+    if (pend.length) {
+      const text = '【シフト希望の提出のお願い】\n' + sh.title + '\n' + (sh.deadline ? '提出期限: ' + fmtDate(sh.deadline) + '\n' : '')
+        + '\nまだ提出していない方がいます。お手数ですが、提出をお願いします。\n\n未提出:\n' + pend.map(p => p.name).join('、')
+        + '\n\n▼提出はこちら\n' + BOOT.baseUrl + '\n\n' + DEVICE_NOTICE;
+      pendBox.append(h('div', { class: 'card' }, h('h2', {}, '未提出 ' + pend.length + '人'),
+        h('div', { class: 'chips' }, pend.map(p => h('span', { class: 'chip' }, p.name))),
+        h('div', { style: 'margin-top:12px' }, h('b', {}, 'Chatwork用の催促文'), copyBox(text, 'コピー'))));
+    } else {
+      pendBox.append(h('div', { class: 'ok' }, '全員が提出しました。'));
+    }
+    const notes = people.filter(p => String(p.note || '').trim());
+    noteBox.append(h('div', { class: 'card' }, h('h2', {}, 'その他希望・連絡(' + notes.length + '人)'),
+      notes.length ? notes.map(p => h('div', { class: 'txt' }, h('div', { class: 'who' }, p.name), p.note)) : h('div', { class: 'sub' }, 'まだありません。')));
+
+    const doneN = people.length - pend.length;
+    show(back,
+      h('div', { style: 'margin-top:8px' }, h('span', { class: 'tag lav' }, 'シフト希望'), h('span', { class: 'tag ' + (sh.open ? '' : 'warn') }, sh.open ? '受付中' : '受付終了')),
+      h('h1', {}, sh.title),
+      h('div', { class: 'sub' }, '対象: ' + shiftMonthLabel(sh.month) + ' / 提出期限: ' + fmtDate(sh.deadline)),
+      h('div', { class: 'prog' }, h('div', { class: 'bar' }, h('i', { style: 'width:' + (people.length ? Math.round(doneN * 100 / people.length) : 0) + '%' })),
+        h('span', {}, doneN + '/' + people.length + '人 提出済み')),
+      msg,
+      h('div', { class: 'card' },
+        h('div', { class: 'row between' }, h('h2', { style: 'margin:0' }, 'Excelのシフト表に貼る'),
+          h('button', { class: 'ghost small', onclick: openSort }, '行の並べ替え')),
+        h('div', { class: 'sub', style: 'margin-top:4px' }, '下の表の順(上から)で、1日〜' + sh.days.length + '日の記号をコピーします。行の順がExcelと違うときは「行の並べ替え」で合わせてください。'),
+        h('div', { class: 'row', style: 'margin-top:8px;gap:16px;font-size:14px' },
+          h('label', {}, fillClosed, ' 休園日に「休」を入れる'),
+          h('label', {}, withName, ' 名前の列も含める')),
+        h('button', { class: 'block', onclick: copyTable }, '表をコピー(Excelに貼り付け用)'),
+        copyMsg,
+        h('div', { class: 'note' }, '貼り付けると、その範囲のセルは上書きされます(空欄の日も空欄で上書きされます)。勤務を入れる前に貼り付けてください。'),
+        totalBox, tblBox,
+        h('div', { class: 'sub', style: 'margin-top:6px' }, '名前の右の数字は、その人が選んだ日数です(コピーには含まれません)。')),
+      sortBox, pendBox, noteBox);
+    drawTable();
   }).catch(e => show(back, errBox(e.message)));
 }
 
