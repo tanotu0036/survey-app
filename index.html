@@ -178,7 +178,7 @@
 // ====== 版番号 ======
 // 画面(この index.html)を修正したら、ここの番号を上げて、下の更新履歴に1行足す。
 // 番号は「年.月.日-その日の何回目か」。GAS側の版番号(コード.gs の GAS_VERSION)とは別に数える。
-const APP_VERSION = '2026.11.04-4';
+const APP_VERSION = '2026.11.04-5';
 // 更新履歴(画面)
 //  2026.10.26-1  版番号の表示を追加。回収メモ(提出物の回収管理)を追加。回収済みの人を下へ並べる、
 //                チェックした瞬間に色を変える、提出物の欄は未提出のものだけ表示、担当している回収メモのカード。
@@ -196,6 +196,7 @@ const APP_VERSION = '2026.11.04-4';
 //                12月・1月を新しく作るときは最初から休園日にする。
 //  2026.11.04-3  年末年始の期間を覚えるのをやめた(暦で毎年前後するので、毎回 12/29〜12/31・1/1〜1/3 から始める)。
 //  2026.11.04-4  シフト希望の作成画面で、行事の入力欄の例(「行事など(例: 秋の遠足)」)を消した。
+//  2026.11.04-5  ログイン後のシフト希望のボタンを「シフト希望を作成する」に(入力画面の「提出する」で送る)。
 
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzArLDP5bk6o9l0yoN1SCvu0aT69dIKvM-hYlCTYMHhZDgvWSfpCr2Ez9cNekm0DHNP/exec';
 
@@ -1728,7 +1729,8 @@ function staffShiftCards() {
       h('h2', { style: 'margin-top:6px' }, sh.title),
       staffProgress(sh, { key: 'shift:' + sh.shiftId, pend: '未提出', done: '提出済み', order: '提出した順', meLeft: !done }),
       h('button', { class: 'block' + (done ? ' ghost' : ''), onclick: () => staffShift(sh) },
-        draft ? '入力のつづき(下書きあり)' : done ? '提出内容を確認・修正する' : 'シフト希望を提出する'));
+        // 未提出は「作成する」で入力画面を開き、入力画面の一番下の「提出する」で送る
+        draft ? '作成のつづき(下書きあり)' : done ? '提出内容を確認・修正する' : 'シフト希望を作成する'));
   });
 }
 
