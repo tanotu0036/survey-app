@@ -143,6 +143,7 @@
   .sday.closed .sub { color:#b4606d; font-weight:600; }
   .sday .dl { font-weight:600; font-size:14px; line-height:1.3; }
   .sday .ev { font-size:11px; font-weight:400; color:var(--sub); }
+  .sday .evl { grid-column:1 / -1; font-size:13px; font-weight:700; color:#d6334a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.4; }
   .wd.sat { color:#3d6482; }
   .wd.sun { color:var(--pink-ink); }
   /* 選択肢は1日1行に収まるよう、行の幅を等分する(--n: 選択肢の数) */
@@ -181,7 +182,7 @@
 // ====== 版番号 ======
 // 画面(この index.html)を修正したら、ここの番号を上げて、下の更新履歴に1行足す。
 // 番号は「年.月.日-その日の何回目か」。GAS側の版番号(コード.gs の GAS_VERSION)とは別に数える。
-const APP_VERSION = '2026.11.04-8';
+const APP_VERSION = '2026.11.04-9';
 // 更新履歴(画面)
 //  2026.10.26-1  版番号の表示を追加。回収メモ(提出物の回収管理)を追加。回収済みの人を下へ並べる、
 //                チェックした瞬間に色を変える、提出物の欄は未提出のものだけ表示、担当している回収メモのカード。
@@ -204,6 +205,8 @@ const APP_VERSION = '2026.11.04-8';
 //  2026.11.04-7  行の並べ替えで空行(産休中の先生の行・区切りの行など)を追加できるようにした。コピーでは記号のない行になる(GAS 2026.11.04-3 が必要)。
 //  2026.11.04-8  シフト希望の対象の職員を作成・修正の画面で選べるようにした。行の並べ替えで「欄外へ」(この月は対象外)にもできる
 //                (対象外の人には提出のお願いを出さず、未提出の数・コピーにも入れない。GAS 2026.11.04-4 が必要)。
+//  2026.11.04-9  職員向けの「PIN」を「パスワード」に言い換え(ログイン画面に初期設定0000の案内)。シフト希望の行事メモを
+//                ボタンの上に1行・赤字で表示。
 
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzArLDP5bk6o9l0yoN1SCvu0aT69dIKvM-hYlCTYMHhZDgvWSfpCr2Ez9cNekm0DHNP/exec';
 
@@ -256,7 +259,7 @@ async function call(fn, ...args) {
   let r;
   try { r = await res.json(); } catch (e) { throw new Error('通信エラーです。時間をおいて、もう一度お試しください。'); }
   if (r && r.ok) return r.data;
-  throw new Error(r && r.error ? r.error : '通信エラー');
+  throw new Error(r && r.error ? String(r.error).replace(/PIN/g, 'パスワード') : '通信エラー');   // GASの「PINが違います」なども画面では「パスワード」と出す
 }
 function show(...nodes) {
   app.replaceChildren(...nodes.flat(Infinity).filter(n => n !== null && n !== undefined && n !== false));
@@ -487,7 +490,7 @@ function staffLogin() {
   btn.addEventListener('click', () => {
     setMsg(box, null);
     if (!facSel.value || !nameSel.value) return setMsg(box, errBox('園と名前を選んでください。'));
-    if (!/^\d{4}$/.test(pin.value)) return setMsg(box, errBox('PINは4桁の数字で入力してください。'));
+    if (!/^\d{4}$/.test(pin.value)) return setMsg(box, errBox('パスワードは4桁の数字で入力してください。'));
     const staffId = nameSel.value, p = pin.value;
     withBusy(btn, call('staffLogin', staffId, p).then(r => {
       S.st = { staffId: staffId, pin: p, name: r.name };
@@ -498,13 +501,13 @@ function staffLogin() {
   });
 
   show(h('h1', {}, '職員アンケート'),
-    h('div', { class: 'sub' }, '園と名前を選び、PINを入力してください。'),
+    h('div', { class: 'sub' }, '園と名前を選び、パスワードを入力してください。'),
     h('div', { class: 'card' },
       h('label', { class: 'f' }, '園'), facSel,
       h('label', { class: 'f' }, '名前'), nameSel,
-      h('label', { class: 'f' }, 'PIN(4桁)'), pin,
+      h('label', { class: 'f' }, 'パスワード(4桁の数字)'), h('div', { class: 'sub', style: 'margin:-2px 0 6px' }, '※初期設定は「0000」です。初回ログイン後、任意の数字4桁に変更してください。'), pin,
       box, btn),
-    h('div', { class: 'note' }, 'この端末にPINは残りません。ただし、回答途中の内容は送信するまでこの端末に保存されます。園の業務用スマホ・パソコンではなく、ご自身のスマホなどで回答してください。PINを忘れたときは園長に伝えてください。'),
+    h('div', { class: 'note' }, 'この端末にパスワードは残りません。ただし、回答途中の内容は送信するまでこの端末に保存されます。園の業務用スマホ・パソコンではなく、ご自身のスマホなどで回答してください。パスワードを忘れたときは園長に伝えてください。'),
     h('div', { class: 'center', style: 'margin-top:28px' }, h('button', { class: 'ghost small', onclick: adminLogin }, '園長・統括の方はこちら')));
 }
 
@@ -512,7 +515,7 @@ function staffChangePin() {
   const np = h('input', { type: 'password', inputmode: 'numeric', maxlength: '4', autocomplete: 'off', placeholder: '新しい4桁' });
   const np2 = h('input', { type: 'password', inputmode: 'numeric', maxlength: '4', autocomplete: 'off', placeholder: 'もう一度' });
   const box = h('div');
-  const btn = h('button', { class: 'block' }, 'PINを変更して進む');
+  const btn = h('button', { class: 'block' }, 'パスワードを変更して進む');
   btn.addEventListener('click', () => {
     setMsg(box, null);
     if (!/^\d{4}$/.test(np.value)) return setMsg(box, errBox('4桁の数字で入力してください。'));
@@ -524,9 +527,9 @@ function staffChangePin() {
   });
   show(h('h1', {}, S.st.name + ' さん'),
     h('div', { class: 'card' },
-      h('h2', {}, 'はじめに、自分のPINを決めてください'),
-      h('div', { class: 'sub' }, '初期PIN(0000)は今回だけ使います。次回からは、ここで決めた番号を使います。'),
-      h('label', { class: 'f' }, '新しいPIN(4桁の数字)'), np,
+      h('h2', {}, 'はじめに、自分のパスワードを決めてください'),
+      h('div', { class: 'sub' }, '初期パスワード(0000)は今回だけ使います。次回からは、ここで決めた番号を使います。'),
+      h('label', { class: 'f' }, '新しいパスワード(4桁の数字)'), np,
       h('label', { class: 'f' }, '確認'), np2, box, btn));
 }
 
@@ -739,7 +742,7 @@ function adminStaff(body) {
   const listMsg = h('div');
   const listBox = h('div', {}, h('div', { class: 'sub' }, '読み込み中…'));
   const names = h('textarea', { placeholder: '1行に1人ずつ名前を入力\n例:\n山田 花子\n佐藤 太郎' });
-  const addBtn = h('button', { class: 'block' }, '追加する(初期PINは全員 0000)');
+  const addBtn = h('button', { class: 'block' }, '追加する(初期パスワードは全員 0000)');
   const resBox = h('div');
   const sortBtn = h('button', { class: 'ghost small' }, '並べ替え');
   let staff = [];
@@ -758,7 +761,7 @@ function adminStaff(body) {
           h('td', { style: s.active ? '' : 'color:#999' }, s.name),
           h('td', {}, s.director ? h('span', { class: 'tag lav' }, '園長') : null,
             s.active ? null : h('span', { class: 'tag gray' }, '無効'),
-            s.active && !s.pinChanged ? h('span', { class: 'tag warn' }, '初期PIN') : null,
+            s.active && !s.pinChanged ? h('span', { class: 'tag warn' }, '初期パスワード') : null,
             s.locked ? h('span', { class: 'tag warn' }, 'ロック中') : null),
           h('td', {}, h('div', { class: 'row' },
             h('button', { class: 'ghost small', onclick: () => renderRename(s) }, '名前を修正'),
@@ -767,12 +770,12 @@ function adminStaff(body) {
               call('adminSetDirector', S.ad.cred, s.staffId, !s.director).then(load).catch(e => setMsg(listMsg, errBox(e.message)));
             } }, s.director ? '園長を外す' : '園長にする'),
             h('button', { class: 'ghost small', onclick: () => {
-              if (!confirm(s.name + ' さんのPINをリセットします。よろしいですか?')) return;
+              if (!confirm(s.name + ' さんのパスワードをリセットします。よろしいですか?')) return;
               call('adminResetPin', S.ad.cred, s.staffId).then(r => {
-                setMsg(listMsg, h('div', { class: 'ok' }, r.name + ' さんのPINを初期PIN ', h('b', {}, r.pin), ' に戻しました(初回ログイン時に本人が変更します)'));
+                setMsg(listMsg, h('div', { class: 'ok' }, r.name + ' さんのパスワードを初期パスワード ', h('b', {}, r.pin), ' に戻しました(初回ログイン時に本人が変更します)'));
                 load();
               }).catch(e => setMsg(listMsg, errBox(e.message)));
-            } }, 'PINリセット'),
+            } }, 'パスワードリセット'),
             h('button', { class: 'danger small', onclick: () => {
               call('adminSetActive', S.ad.cred, s.staffId, !s.active).then(load).catch(e => setMsg(listMsg, errBox(e.message)));
             } }, s.active ? '無効にする' : '有効に戻す')))))));
@@ -848,7 +851,7 @@ function adminStaff(body) {
     withBusy(addBtn, call('adminAddStaff', S.ad.cred, arr).then(r => {
       names.value = '';
       setMsg(resBox, h('div', { class: 'ok' },
-        r.created.length + '人を登録しました。全員の初期PINは「0000」です。初回ログイン時に、各自が自分のPINへ変更します。',
+        r.created.length + '人を登録しました。全員の初期パスワードは「0000」です。初回ログイン時に、各自が自分のパスワードへ変更します。',
         r.skipped.length ? h('div', {}, '登録済みのためスキップ: ' + r.skipped.join('、')) : null));
       load();
     }).catch(e => setMsg(box, errBox(e.message))));
@@ -990,7 +993,7 @@ function adminShareText(v) {
     + (v.audience === 'director' ? '※各園の園長の方が対象です\n' : '')
     + (v.anonymous ? '※無記名(回答内容とお名前は紐づきません)\n' : '')
     + '\n▼回答はこちら\n' + surveyUrl(v.surveyId) + '\n\n'
-    + '園と名前を選び、PIN(4桁)を入力してください。\n' + DEVICE_NOTICE;
+    + '園と名前を選び、パスワード(4桁)を入力してください。\n' + DEVICE_NOTICE;
   show(h('button', { class: 'ghost small', onclick: adminMain }, '← 戻る'), h('h1', {}, 'Chatwork用の依頼文'),
     h('div', { class: 'card' }, copyBox(text, 'コピー'), h('div', { class: 'sub', style: 'margin-top:8px' }, 'Chatworkのグループチャットに貼り付けて送信してください。')));
 }
@@ -1771,12 +1774,14 @@ function staffShift(sh) {
       : ['まだ選んでいません(希望がなければ、何も選ばずに提出してください)']));
   }
   const rows = sh.days.map(d => {
-    const lab = h('div', { class: 'dl' }, shiftDayLabel(sh.month, d), !d.closed && d.note ? h('div', { class: 'ev' }, d.note) : null);
+    // 行事メモは日付の欄に詰めず、ボタンの上に1行で赤字で出す
+    const lab = h('div', { class: 'dl' }, shiftDayLabel(sh.month, d));
+    const ev = !d.closed && d.note ? h('div', { class: 'evl' }, d.note) : null;
     if (d.closed) return h('div', { class: 'sday closed' }, lab, h('div', { class: 'sub' }, '休園日' + (d.note ? '(' + d.note + ')' : '')));
     // 4文字以上は真ん中で折り返す(「午前半休」→「午前/半休」)
     const btns = sh.options.map(o => h('button', { class: 'sopt', type: 'button' },
       o.label.length >= 4 ? [o.label.slice(0, Math.ceil(o.label.length / 2)), h('wbr'), o.label.slice(Math.ceil(o.label.length / 2))] : o.label));
-    const row = h('div', { class: 'sday' }, lab, h('div', { class: 'sopts', style: '--n:' + sh.options.length }, btns));
+    const row = h('div', { class: 'sday' }, ev, lab, h('div', { class: 'sopts', style: '--n:' + sh.options.length }, btns));
     // 選んだボタンは選択肢の色で塗る。選んでいないボタンは文字だけその色にする
     function paint() {
       btns.forEach((b, i) => {
@@ -1857,7 +1862,7 @@ function shiftShareText(x, after) {
   const text = '【シフト希望の提出のお願い】\n' + x.title + '\n'
     + (x.deadline ? '提出期限: ' + fmtDate(x.deadline) + '\n' : '')
     + '\n▼提出はこちら\n' + BOOT.baseUrl + '\n\n'
-    + '園と名前を選び、PIN(4桁)を入力すると、ログイン後の画面に「シフト希望」が出ます。\n'
+    + '園と名前を選び、パスワード(4桁)を入力すると、ログイン後の画面に「シフト希望」が出ます。\n'
     + '※提出期限までは、何度でも修正できます。\n' + DEVICE_NOTICE;
   show(h('button', { class: 'ghost small', onclick: after || adminMain }, '← 戻る'), h('h1', {}, 'Chatwork用の依頼文'),
     h('div', { class: 'card' }, copyBox(text, 'コピー'), h('div', { class: 'sub', style: 'margin-top:8px' }, 'Chatworkのグループチャットに貼り付けて送信してください。')));
