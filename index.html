@@ -165,6 +165,9 @@
   table.shift .cl { background:#fdeaed; color:#b4606d; }
   table.shift .ev { font-size:10px; color:var(--sub); white-space:normal; max-width:4em; line-height:1.2; }
   table.shift tr.pend .nm { color:var(--pink-ink); }
+  table.shift tr.blankrow td { background:repeating-linear-gradient(45deg,#fafafc,#fafafc 4px,#f1f0f5 4px,#f1f0f5 8px); }
+  table.shift tr.blankrow td.cl { background:#fdeaed; }
+  .sortrow.blank { background:#fafafc; }
   table.shift .cnt { min-width:2.6em; font-weight:600; }
   table.shift tr:not(:first-child) th.cnt { border-top-color:transparent; }
 </style>
@@ -178,7 +181,7 @@
 // ====== 版番号 ======
 // 画面(この index.html)を修正したら、ここの番号を上げて、下の更新履歴に1行足す。
 // 番号は「年.月.日-その日の何回目か」。GAS側の版番号(コード.gs の GAS_VERSION)とは別に数える。
-const APP_VERSION = '2026.11.04-6';
+const APP_VERSION = '2026.11.04-7';
 // 更新履歴(画面)
 //  2026.10.26-1  版番号の表示を追加。回収メモ(提出物の回収管理)を追加。回収済みの人を下へ並べる、
 //                チェックした瞬間に色を変える、提出物の欄は未提出のものだけ表示、担当している回収メモのカード。
@@ -198,6 +201,7 @@ const APP_VERSION = '2026.11.04-6';
 //  2026.11.04-4  シフト希望の作成画面で、行事の入力欄の例(「行事など(例: 秋の遠足)」)を消した。
 //  2026.11.04-5  ログイン後のシフト希望のボタンを「シフト希望を作成する」に(入力画面の「提出する」で送る)。
 //  2026.11.04-6  Excel用のコピーに「その他希望・連絡」の列を入れられるようにした(1日の左。シフト表のD列「希望」に合わせる)。
+//  2026.11.04-7  行の並べ替えで空行(産休中の先生の行・区切りの行など)を追加できるようにした。コピーでは記号のない行になる(GAS 2026.11.04-3 が必要)。
 
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzArLDP5bk6o9l0yoN1SCvu0aT69dIKvM-hYlCTYMHhZDgvWSfpCr2Ez9cNekm0DHNP/exec';
 
@@ -859,7 +863,7 @@ function adminStaff(body) {
 // 並べ替えのドラッグ(職員一覧・シフト希望の行の順で共通)。done: 指を離したあとに呼ぶ
 // マウスは行のどこからでも、スマホは左の「⠿」をつかんで動かす(行の他の場所は画面のスクロールに使う)
 function sortDrag(e, row, wrap, done) {
-  if (e.button > 0 || e.target.closest('button')) return;
+  if (e.button > 0 || e.target.closest('button, input')) return;   // ボタンや入力欄を押したときは動かさない
   if (e.pointerType !== 'mouse' && !e.target.closest('.grip')) return;
   e.preventDefault();
   row.setPointerCapture(e.pointerId);
@@ -2014,7 +2018,23 @@ function shiftDetail(shiftId) {
   show(back, h('div', { class: 'sub' }, '読み込み中…'));
   call('adminGetShift', S.ad.cred, shiftId).then(d => {
     const sh = d.shift;
-    let people = d.people;
+    const people = d.people;   // 職員(提出状況・その他希望の一覧に使う)
+    // 表・コピーの行: 職員と空行(産休中の先生の行や区切りの行など。記号のない行になる)を、保存した並び順どおりに並べる
+    let bn = 0;
+    const blankRow = label => ({ blank: true, key: 'b' + (++bn), label: label || '', name: '', choices: {}, note: '' });
+    function buildRows(order) {
+      const byId = {};
+      people.forEach(p => { byId[p.staffId] = p; });
+      const used = new Set(), out = [];
+      (order || []).forEach(v => {
+        if (v && typeof v === 'object') out.push(blankRow(v.b));
+        else if (byId[v] && !used.has(v)) { used.add(v); out.push(byId[v]); }
+      });
+      people.forEach(p => { if (!used.has(p.staffId)) out.push(p); });   // 並び順にない職員(新しく入った人など)は下に
+      return out;
+    }
+    let rows = buildRows(d.order);
+    const rowKey = p => p.blank ? p.key : p.staffId;
     const optById = {};
     sh.options.forEach(o => { optById[o.id] = o; });
     const msg = h('div');
@@ -2048,7 +2068,13 @@ function shiftDetail(shiftId) {
       const head2 = h('tr', {}, h('th', { class: 'nm' }, ''), cntHead(false), sh.days.map(x => h('th', { class: x.closed ? 'cl' : '' }, shiftDayLabel(sh.month, x)[1])));
       const head3 = h('tr', {}, h('th', { class: 'nm sub' }, '行事'), cntHead(false), sh.days.map(x => h('th', { class: 'ev' + (x.closed ? ' cl' : '') }, x.closed ? '休' + (x.note ? ' ' + x.note : '') : x.note)));
       tblBox.replaceChildren(h('table', { class: 'shift' }, head1, head2, head3,
-        people.map(p => {
+        rows.map(p => {
+          if (p.blank) {
+            return h('tr', { class: 'blankrow' },
+              h('td', { class: 'nm' }, h('span', { class: 'sub' }, '(空行)' + (p.label ? ' ' + p.label : ''))),
+              sh.options.map(() => h('td', { class: 'cnt' })),
+              sh.days.map(x => h('td', { class: x.closed ? 'cl' : '' }, cell(p, x))));
+          }
           const cn = countsOf(p);
           return h('tr', { class: p.submittedAt ? '' : 'pend' },
             h('td', { class: 'nm' }, p.name, p.submittedAt ? null : h('span', { class: 'tag warn', style: 'margin-left:4px' }, '未提出')),
@@ -2069,7 +2095,7 @@ function shiftDetail(shiftId) {
     // 列の並び: (名前) → (その他希望・連絡) → 1日〜末日。
     // 改行やタブがあると貼り付けで行や列がずれるので、空白に置き換える
     function tsv() {
-      return people.map(p => (withName.checked ? [p.name] : []).concat(withNote.checked ? [p.note || ''] : [], sh.days.map(x => cell(p, x)))
+      return rows.map(p => (withName.checked ? [p.name] : []).concat(withNote.checked ? [p.note || ''] : [], sh.days.map(x => cell(p, x)))
         .map(v => String(v).replace(/[\t\r\n]+/g, ' ').trim()).join('\t')).join('\r\n');
     }
     // 貼り付けるときに選ぶセル(コピーした範囲の左上)
@@ -2086,7 +2112,9 @@ function shiftDetail(shiftId) {
         ta.remove();
       }
       const pend = people.filter(p => !p.submittedAt).length;
-      copyMsg.replaceChildren(h('div', { class: 'ok' }, people.length + '人 × ' + sh.days.length + '日分をコピーしました。Excelのシフト表で「'
+      const blanks = rows.length - people.length;
+      copyMsg.replaceChildren(h('div', { class: 'ok' }, rows.length + '行(職員' + people.length + '人' + (blanks ? '・空行' + blanks + '行' : '') + ') × '
+        + sh.days.length + '日分をコピーしました。Excelのシフト表で「'
         + startCell() + '」のセルを選んで、貼り付け(Ctrl+V)してください。'
         + (pend ? '(未提出の' + pend + '人は空欄です)' : '')));
     }
@@ -2103,7 +2131,8 @@ function shiftDetail(shiftId) {
 
     // ---- 行の並べ替え(このシフト希望だけの並び順。Excelのシフト表の行の順に合わせる) ----
     function openSort() {
-      const order = people.slice();
+      // 空行の名前はこの画面で直すので、行を写して使う(「やめる」を押したら元のまま)
+      const order = rows.map(p => p.blank ? Object.assign({}, p) : p);
       const wrap = h('div');
       const save = h('button', { class: 'small' }, 'この順番で保存');
       function move(i, dd) {
@@ -2114,24 +2143,36 @@ function shiftDetail(shiftId) {
       }
       function draw() {
         wrap.replaceChildren(...order.map((p, i) => {
-          const row = h('div', { class: 'sortrow' },
+          const name = p.blank
+            ? h('span', { class: 'sortname row', style: 'flex-wrap:nowrap;gap:6px' }, h('span', { class: 'tag gray', style: 'white-space:nowrap;flex:none' }, '空行'),
+                h('input', { type: 'text', maxlength: '30', placeholder: '名前(例: 産休中 ○○先生、区切り)', value: p.label,
+                  style: 'padding:5px 8px;font-size:14px', oninput: e => { p.label = e.target.value; } }))
+            : h('span', { class: 'sortname' }, p.name);
+          const row = h('div', { class: 'sortrow' + (p.blank ? ' blank' : '') },
             h('span', { class: 'grip', 'aria-hidden': 'true' }, '⠿'),
             h('span', { class: 'sortno' }, String(i + 1)),
-            h('span', { class: 'sortname' }, p.name),
+            name,
+            p.blank ? h('button', { class: 'danger small', onclick: () => { order.splice(i, 1); draw(); }, 'aria-label': '空行を消す' }, '×') : null,
             h('button', { class: 'ghost small', disabled: i === 0, onclick: () => move(i, -1), 'aria-label': '上へ' }, '▲'),
             h('button', { class: 'ghost small', disabled: i === order.length - 1, onclick: () => move(i, 1), 'aria-label': '下へ' }, '▼'));
-          row.dataset.id = p.staffId;
+          row.dataset.id = rowKey(p);
           row.addEventListener('pointerdown', e => sortDrag(e, row, wrap, () => {
             const ids = [...wrap.children].map(r => r.dataset.id);
-            order.sort((a, b) => ids.indexOf(a.staffId) - ids.indexOf(b.staffId));
+            order.sort((a, b) => ids.indexOf(rowKey(a)) - ids.indexOf(rowKey(b)));
             draw();
           }));
           return row;
         }));
       }
+      const addBlank = h('button', { class: 'ghost small', onclick: () => {
+        order.push(blankRow(''));
+        draw();
+        const inputs = wrap.querySelectorAll('input');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+      } }, '+ 空行を追加');
       save.addEventListener('click', () => {
-        withBusy(save, call('adminSetShiftOrder', S.ad.cred, sh.shiftId, order.map(p => p.staffId)).then(() => {
-          people = order;
+        withBusy(save, call('adminSetShiftOrder', S.ad.cred, sh.shiftId, order.map(p => p.blank ? { b: p.label.trim() } : p.staffId)).then(() => {
+          rows = order;
           sortBox.replaceChildren();
           setMsg(msg, h('div', { class: 'ok' }, '行の並び順を保存しました。次に作るシフト希望も、この並びを引き継ぎます。'));
           drawTable(); setMsg(copyMsg, null);
@@ -2141,7 +2182,10 @@ function shiftDetail(shiftId) {
       sortBox.replaceChildren(h('div', { class: 'card' },
         h('h2', {}, '行の並べ替え'),
         h('div', { class: 'sub', style: 'margin-bottom:8px' }, 'Excelのシフト表の行と同じ順に並べてください。名前をドラッグして動かします(スマホは左の ⠿ をつかみます。▲▼でも動かせます)。この並びは、このシフト希望だけのものです(職員一覧の並びは変わりません)。'),
-        wrap, h('div', { class: 'row', style: 'margin-top:10px' }, save, h('button', { class: 'ghost small', onclick: () => sortBox.replaceChildren() }, 'やめる'))));
+        h('div', { class: 'sub', style: 'margin-bottom:8px' }, '産休中の先生の行や区切りの行など、Excelにあってアプリにいない行は「+ 空行を追加」で入れてください。空行は記号のない行としてコピーされます。'),
+        wrap,
+        h('div', { style: 'margin-top:8px' }, addBlank),
+        h('div', { class: 'row', style: 'margin-top:10px' }, save, h('button', { class: 'ghost small', onclick: () => sortBox.replaceChildren() }, 'やめる'))));
       sortBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
