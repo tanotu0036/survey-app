@@ -163,6 +163,9 @@
   table.shift { width:auto; border-collapse:collapse; font-size:12px; white-space:nowrap; }
   table.shift th, table.shift td { text-align:center; padding:3px 5px; border:1px solid var(--line); min-width:2.2em; }
   table.shift .nm { text-align:left; position:sticky; left:0; background:#fff; z-index:1; }
+  table.shift .nmrow { display:flex; align-items:center; justify-content:space-between; gap:6px; }
+  table.shift button.rowcopy { padding:2px 7px; font-size:11px; min-height:0; flex:none; }
+  table.shift button.rowcopy.done { background:#e3f4ec; color:#237a60; border-color:#a8dcc9; }
   table.shift .cl { background:#fdeaed; color:#b4606d; }
   table.shift .ev { font-size:10px; color:var(--sub); white-space:normal; max-width:4em; line-height:1.2; }
   table.shift tr.pend .nm { color:var(--pink-ink); }
@@ -182,7 +185,7 @@
 // ====== 版番号 ======
 // 画面(この index.html)を修正したら、ここの番号を上げて、下の更新履歴に1行足す。
 // 番号は「年.月.日-その日の何回目か」。GAS側の版番号(コード.gs の GAS_VERSION)とは別に数える。
-const APP_VERSION = '2026.11.04-9';
+const APP_VERSION = '2026.11.20-1';
 // 更新履歴(画面)
 //  2026.10.26-1  版番号の表示を追加。回収メモ(提出物の回収管理)を追加。回収済みの人を下へ並べる、
 //                チェックした瞬間に色を変える、提出物の欄は未提出のものだけ表示、担当している回収メモのカード。
@@ -207,6 +210,7 @@ const APP_VERSION = '2026.11.04-9';
 //                (対象外の人には提出のお願いを出さず、未提出の数・コピーにも入れない。GAS 2026.11.04-4 が必要)。
 //  2026.11.04-9  職員向けの「PIN」を「パスワード」に言い換え(ログイン画面に初期設定0000の案内)。シフト希望の行事メモを
 //                ボタンの上に1行・赤字で表示。
+//  2026.11.20-1  シフト希望の集計の表で、職員1人ずつの行をコピーできるボタン(名前の横の「コピー」)を追加。
 
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzArLDP5bk6o9l0yoN1SCvu0aT69dIKvM-hYlCTYMHhZDgvWSfpCr2Ez9cNekm0DHNP/exec';
 
@@ -2109,7 +2113,8 @@ function shiftDetail(shiftId, notice) {
           }
           const cn = countsOf(p);
           return h('tr', { class: p.submittedAt ? '' : 'pend' },
-            h('td', { class: 'nm' }, p.name, p.submittedAt ? null : h('span', { class: 'tag warn', style: 'margin-left:4px' }, '未提出')),
+            h('td', { class: 'nm' }, h('span', { class: 'nmrow' }, h('span', {}, p.name, p.submittedAt ? null : h('span', { class: 'tag warn', style: 'margin-left:4px' }, '未提出')),
+              p.submittedAt ? h('button', { class: 'ghost small rowcopy', type: 'button', title: 'この人の1行だけコピー', onclick: e => copyOne(p, e.currentTarget) }, 'コピー') : null)),
             sh.options.map((o, j) => h('td', { class: 'cnt', style: cn[j] ? shiftColorStyle(colorOf[o.id]) : '' }, p.submittedAt ? cn[j] : '')),
             sh.days.map(x => {
               const v = cell(p, x), id = p.choices[x.d];
@@ -2126,29 +2131,48 @@ function shiftDetail(shiftId, notice) {
     // Excelに貼る形(タブ区切り)。行は並び順どおり、列は1日〜末日
     // 列の並び: (名前) → (その他希望・連絡) → 1日〜末日。
     // 改行やタブがあると貼り付けで行や列がずれるので、空白に置き換える
+    function rowTsv(p) {
+      return (withName.checked ? [p.name] : []).concat(withNote.checked ? [p.note || ''] : [], sh.days.map(x => cell(p, x)))
+        .map(v => String(v).replace(/[\t\r\n]+/g, ' ').trim()).join('\t');
+    }
     function tsv() {
-      return rows.map(p => (withName.checked ? [p.name] : []).concat(withNote.checked ? [p.note || ''] : [], sh.days.map(x => cell(p, x)))
-        .map(v => String(v).replace(/[\t\r\n]+/g, ' ').trim()).join('\t')).join('\r\n');
+      return rows.map(rowTsv).join('\r\n');
     }
     // 貼り付けるときに選ぶセル(コピーした範囲の左上)
-    function startCell() {
-      return withName.checked ? '1人目の名前' : withNote.checked ? '1人目の希望(D列)' : '1人目の1日';
+    function startCell(who) {
+      who = who || '1人目';
+      return withName.checked ? who + 'の名前' : withNote.checked ? who + 'の希望(D列)' : who + 'の1日';
     }
-    async function copyTable() {
-      const text = tsv();
-      try { await navigator.clipboard.writeText(text); }
+    // クリップボードに書く(書けなかったら false)
+    async function writeClip(text) {
+      try { await navigator.clipboard.writeText(text); return true; }
       catch (e) {
         const ta = h('textarea', { style: 'position:fixed;top:0;left:0;opacity:0' });
         ta.value = text; document.body.append(ta); ta.select();
-        try { document.execCommand('copy'); } catch (e2) { ta.remove(); return copyMsg.replaceChildren(errBox('コピーできませんでした。別のブラウザで試してください。')); }
+        let ok = false;
+        try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
         ta.remove();
+        return ok;
       }
+    }
+    async function copyTable() {
+      if (!(await writeClip(tsv()))) return copyMsg.replaceChildren(errBox('コピーできませんでした。別のブラウザで試してください。'));
       const pend = people.filter(p => !p.submittedAt).length;
       const blanks = rows.length - people.length;
       copyMsg.replaceChildren(h('div', { class: 'ok' }, rows.length + '行(職員' + people.length + '人' + (blanks ? '・空行' + blanks + '行' : '') + ') × '
         + sh.days.length + '日分をコピーしました。Excelのシフト表で「'
         + startCell() + '」のセルを選んで、貼り付け(Ctrl+V)してください。'
         + (pend ? '(未提出の' + pend + '人は空欄です)' : '')));
+    }
+    // 1人分だけコピー(あとから出し直した人の行だけ貼り直すときなど)。押したボタンにも結果を出す
+    async function copyOne(p, btn) {
+      const ok = await writeClip(rowTsv(p));
+      if (!ok) { btn.textContent = '失敗'; copyMsg.replaceChildren(errBox('コピーできませんでした。別のブラウザで試してください。')); return; }
+      btn.textContent = 'コピー済';
+      btn.classList.add('done');
+      setTimeout(() => { btn.textContent = 'コピー'; btn.classList.remove('done'); }, 2500);
+      copyMsg.replaceChildren(h('div', { class: 'ok' }, p.name + ' さんの1行(' + sh.days.length + '日分)をコピーしました。Excelのシフト表で「'
+        + startCell(p.name + ' さん') + '」のセルを選んで、貼り付け(Ctrl+V)してください。'));
     }
     withName.addEventListener('change', () => { setMsg(copyMsg, null); drawHint(); });
     withNote.addEventListener('change', () => { setMsg(copyMsg, null); drawHint(); });
@@ -2279,7 +2303,7 @@ function shiftDetail(shiftId, notice) {
         copyMsg,
         h('div', { class: 'note' }, '貼り付けると、その範囲のセルは上書きされます(空欄の日も空欄で上書きされます)。勤務を入れる前に貼り付けてください。'),
         totalBox, tblBox,
-        h('div', { class: 'sub', style: 'margin-top:6px' }, '名前の右の数字は、その人が選んだ日数です(コピーには含まれません)。')),
+        h('div', { class: 'sub', style: 'margin-top:6px' }, '名前の横の「コピー」で、その人の1行だけをコピーできます(あとから出し直した人の行だけ貼り直すときなどに)。名前の右の数字は、その人が選んだ日数です(コピーには含まれません)。')),
       sortBox, pendBox, noteBox);
     drawTable();
   }).catch(e => show(back, errBox(e.message)));
