@@ -62,6 +62,13 @@
   .bar { height:12px; background:#f0ecf7; border-radius:99px; overflow:hidden; }
   .bar > i { display:block; height:100%; background:linear-gradient(90deg,#a9d8c8,#a8cff0); border-radius:99px; }
   .bl { display:flex; justify-content:space-between; font-size:14px; margin-top:8px; gap:8px; }
+  .wholist { font-size:13px; color:#2f5878; margin:4px 0 2px; line-height:1.5; }
+  table.matrix { width:auto; font-size:13px; white-space:nowrap; }
+  table.matrix th, table.matrix td { text-align:center; border:1px solid var(--line); padding:4px 8px; }
+  table.matrix .nm { text-align:left; position:sticky; left:0; background:#fff; }
+  table.matrix td.yes { background:#e3f4ec; color:#237a60; font-weight:700; }
+  table.matrix .top { background:#fff4d1; font-weight:700; }
+  table.matrix tr.sum td { font-weight:700; }
   .qbox { border:1.5px dashed #d9d0ec; border-radius:14px; padding:12px; margin:10px 0; background:#fdfcff; }
   .txt { background:#fbf9fe; border:1px solid var(--line); border-radius:12px; padding:8px 12px; margin:6px 0; white-space:pre-wrap; font-size:14px; }
   .txt .who { font-size:12px; font-weight:600; color:#2f5878; white-space:normal; margin-bottom:2px; }
@@ -185,7 +192,7 @@
 // ====== 版番号 ======
 // 画面(この index.html)を修正したら、ここの番号を上げて、下の更新履歴に1行足す。
 // 番号は「年.月.日-その日の何回目か」。GAS側の版番号(コード.gs の GAS_VERSION)とは別に数える。
-const APP_VERSION = '2026.11.20-1';
+const APP_VERSION = '2026.11.26-1';
 // 更新履歴(画面)
 //  2026.10.26-1  版番号の表示を追加。回収メモ(提出物の回収管理)を追加。回収済みの人を下へ並べる、
 //                チェックした瞬間に色を変える、提出物の欄は未提出のものだけ表示、担当している回収メモのカード。
@@ -211,6 +218,8 @@ const APP_VERSION = '2026.11.20-1';
 //  2026.11.04-9  職員向けの「PIN」を「パスワード」に言い換え(ログイン画面に初期設定0000の案内)。シフト希望の行事メモを
 //                ボタンの上に1行・赤字で表示。
 //  2026.11.20-1  シフト希望の集計の表で、職員1人ずつの行をコピーできるボタン(名前の横の「コピー」)を追加。
+//  2026.11.26-1  アンケート結果(記名)で、選択肢ごとに選んだ人の名前を表示。いちばん多い選択肢に印。名前×選択肢の○表と、
+//                Chatworkなどに貼れる「まとめ」のコピーを追加(日程調整などで、何日に誰が来られるかが一目で分かる)。
 
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzArLDP5bk6o9l0yoN1SCvu0aT69dIKvM-hYlCTYMHhZDgvWSfpCr2Ez9cNekm0DHNP/exec';
 
@@ -2441,12 +2450,33 @@ function adminResults(surveyId) {
           h('span', { class: 'avg' }, n ? (sum / n).toFixed(1) : '−'), h('span', { class: 'sub' }, ' / 5(' + n + '人が回答)')));
         if (q.low || q.high) card.append(h('div', { class: 'scale-ends' }, h('span', {}, '1: ' + (q.low || '')), h('span', {}, '5: ' + (q.high || ''))));
       }
+      // 記名のときは、選択肢ごとに選んだ人の名前も出す(例: 日程アンケートで「何日に誰が来られるか」が一目で分かる)
+      const chose = (p, o) => { const v = p.answers[q.id]; return Array.isArray(v) ? v.map(String).indexOf(String(o)) >= 0 : String(v === undefined ? '' : v) === String(o); };
+      const namesOf = o => people ? people.filter(p => chose(p, o)).map(p => p.name) : [];
+      const max = Math.max(0, ...q.options.map(o => s.counts[o] || 0));
       q.options.forEach(o => {
         const c = s.counts[o] || 0;
         const pct = Math.round(c * 100 / total);
-        card.append(h('div', { class: 'bl' }, h('span', {}, o), h('span', {}, c + '人 (' + pct + '%)')),
+        const top = max > 0 && c === max && q.type !== 'scale';
+        card.append(h('div', { class: 'bl' }, h('span', {}, o, top ? h('span', { class: 'tag', style: 'margin-left:6px' }, 'いちばん多い') : null), h('span', {}, c + '人 (' + pct + '%)')),
           h('div', { class: 'bar' }, h('i', { style: 'width:' + pct + '%' })));
+        const ns = namesOf(o);
+        if (ns.length) card.append(h('div', { class: 'wholist' }, ns.join('、')));
       });
+      // 記名の選択式: 名前×選択肢の○表と、Chatworkなどに貼れるまとめ
+      if (people && people.length && q.type !== 'scale') {
+        const pend = (showFac || !sv.all) ? r.notCompleted : null;
+        const tbl = h('div', { style: 'overflow-x:auto' }, h('table', { class: 'matrix' },
+          h('tr', {}, h('th', {}, '名前'), q.options.map(o => h('th', { class: (s.counts[o] || 0) === max && max > 0 ? 'top' : '' }, o))),
+          people.map(p => h('tr', {}, h('td', { class: 'nm' }, p.name), q.options.map(o => h('td', { class: chose(p, o) ? 'yes' : '' }, chose(p, o) ? '○' : '')))),
+          h('tr', { class: 'sum' }, h('td', { class: 'nm' }, '合計'), q.options.map(o => h('td', { class: (s.counts[o] || 0) === max && max > 0 ? 'top' : '' }, (s.counts[o] || 0) + '人')))));
+        const text = '【' + sv.title + '】\n' + q.text + '\n\n'
+          + q.options.map(o => { const ns = namesOf(o); return '■ ' + o + '　' + ns.length + '人' + (ns.length ? '\n' + ns.join('、') : ''); }).join('\n\n')
+          + (pend && pend.length ? '\n\n(未回答: ' + pend.join('、') + ')' : '');
+        card.append(h('details', { style: 'margin-top:10px' }, h('summary', { class: 'sub' }, '○の表で見る・まとめをコピーする'),
+          tbl, pend && pend.length ? h('div', { class: 'sub', style: 'margin-top:6px' }, '未回答: ' + pend.join('、')) : null,
+          h('div', { style: 'margin-top:10px' }, h('b', {}, 'まとめ(Chatworkなどに貼れます)'), copyBox(text, 'まとめをコピー'))));
+      }
       return card;
     }
 
